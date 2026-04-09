@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAI Research Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>OpenAI Research Agent</h1>
+      <p class="subtitle">
+        Ask anything. The agent searches the web, answers, and adds verification notes.
+      </p>
+
+      <form id="ask-form">
+        <textarea
+          id="question"
+          placeholder="Ask a real-time question (news, stocks, releases, regulations, etc.)"
+          required
+        ></textarea>
+        <button id="submit-btn" type="submit">Research</button>
+      </form>
+
+      <section id="status" class="status"></section>
+
+      <section id="result" class="result hidden">
+        <h2>Answer</h2>
+        <pre id="answer"></pre>
+
+        <h2>Verification</h2>
+        <pre id="verification"></pre>
+
+        <div class="meta">
+          <span id="confidence"></span>
+          <span id="verified-at"></span>
+          <span id="model"></span>
+        </div>
+
+        <h2>Sources</h2>
+        <ul id="sources"></ul>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
