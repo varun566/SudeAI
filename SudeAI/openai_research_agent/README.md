@@ -102,3 +102,23 @@ Response includes:
 - This app requires internet access at runtime for web search.
 - Some runs may return fewer/no explicit source annotations depending on model output.
 - If your account has no API quota, keep `DEMO_MODE=true` for presentation/testing.
+
+## Deploy (Render - Public URL)
+
+This repository includes a Render blueprint at `render.yaml` (repo root).
+
+### Quick Steps
+1. Push latest code to GitHub (`varun566/SudeAI`).
+2. In Render, click **New +** -> **Blueprint**.
+3. Select your GitHub repo: `varun566/SudeAI`.
+4. Render auto-detects `render.yaml`.
+5. Set secret env var:
+   - `GEMINI_API_KEY` = your Gemini API key
+6. Click **Apply** to deploy.
+
+### Result
+- Render builds from `openai_research_agent/`
+- Starts with:
+  - `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- You get a public URL like:
+  - `https://sudeai-research-agent.onrender.com`
