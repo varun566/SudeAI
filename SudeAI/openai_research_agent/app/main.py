@@ -84,7 +84,10 @@ def _build_response(question: str, session_id: str, strict_sources: bool = False
     try:
         result = agent.run(question=question, session_id=session_id, strict_sources=strict_sources)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Assistant error: {str(exc)}")
+        message = str(exc)
+        if "Gemini is not configured" in message:
+            message = "Gemini is not configured. Set GEMINI_API_KEY (or enable DEMO_MODE=true)."
+        raise HTTPException(status_code=502, detail=f"Assistant error: {message}")
 
     return AskResponse(
         session_id=session_id,
@@ -120,13 +123,36 @@ async def ask_stream(question: str, session_id: str | None = None, strict_source
 
     def event_stream() -> Iterator[str]:
         yield "event: status\ndata: researching\n\n"
-        response = _build_response(question=q, session_id=sid, strict_sources=strict_sources)
-        payload = response.model_dump()
-        answer = payload.get("answer", "")
-        for i in range(0, len(answer), 56):
-            chunk = answer[i : i + 56]
-            yield f"event: chunk\ndata: {json.dumps({'text': chunk})}\n\n"
-        yield f"event: final\ndata: {json.dumps(payload)}\n\n"
+        try:
+            response = _build_response(question=q, session_id=sid, strict_sources=strict_sources)
+            payload = response.model_dump()
+            answer = payload.get("answer", "")
+            for i in range(0, len(answer), 56):
+                chunk = answer[i : i + 56]
+                yield f"event: chunk\ndata: {json.dumps({'text': chunk})}\n\n"
+            yield f"event: final\ndata: {json.dumps(payload)}\n\n"
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            fallback = {
+                "session_id": sid,
+                "question": q,
+                "answer": detail,
+                "verification_notes": "Confidence: Low\nVerification Notes:\n- Request failed before model response.",
+                "confidence": "Low",
+                "sources": [],
+                "verified_at_utc": "",
+                "model": "error",
+                "tool_trace": ["stream_error"],
+                "memory_used": 0,
+                "agent_panels": {
+                    "retriever": "No retrieval completed due to request error.",
+                    "analyst": detail,
+                    "verifier": "Request failed before verification.",
+                    "summarizer": detail,
+                },
+            }
+            yield "event: status\ndata: error\n\n"
+            yield f"event: final\ndata: {json.dumps(fallback)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
