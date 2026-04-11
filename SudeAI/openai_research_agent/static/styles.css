@@ -84,6 +84,48 @@ pre {
   border: 1px solid var(--border);
 }
 
+.timeline {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f7faf9;
+  padding: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.timeline-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+.timeline-item.user {
+  border-left: 4px solid #0f5fca;
+}
+
+.timeline-item.assistant {
+  border-left: 4px solid var(--accent);
+}
+
+.timeline-role {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+
+.timeline-text {
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+}
+
+.timeline-empty {
+  color: var(--muted);
+  padding: 6px;
+}
+
 .meta {
   display: flex;
   flex-wrap: wrap;

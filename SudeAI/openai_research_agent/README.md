@@ -6,12 +6,15 @@ A live AI assistant that can:
 - verify answers using fresh web data
 
 ## Features
-- Web-enabled research using OpenAI Responses API + `web_search_preview`
-- Gemini provider mode using free-tier API + DuckDuckGo web retrieval
+- Agent-style orchestration with explicit tool calls
+- Live web search + page fetching for latest data
+- Acronym disambiguation for tech context (e.g., `ml` -> Machine Learning)
+- Trusted-source ranking (official/news/authority domains prioritized)
 - Two-pass flow:
   - primary answer generation
   - verification/fact-check pass
-- Source link extraction (when returned by the model)
+- Session memory (SQLite) across turns
+- Source links + tool trace + conversation timeline visible in UI
 - Simple FastAPI backend + browser UI
 
 ## Project Structure
@@ -92,11 +95,18 @@ Request:
 ```
 
 Response includes:
+- `session_id`
 - `answer`
 - `verification_notes`
 - `confidence`
 - `sources`
 - `verified_at_utc`
+- `tool_trace`
+- `memory_used`
+
+### `GET /history/{session_id}`
+
+Returns recent chat memory for a session.
 
 ## Notes
 - This app requires internet access at runtime for web search.
