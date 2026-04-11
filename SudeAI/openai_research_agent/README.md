@@ -8,6 +8,7 @@ A live AI assistant that can:
 ## Features
 - Agent-style orchestration with explicit tool calls
 - Live web search + page fetching for latest data
+- Multi-source retrieval: DDGS + Google News RSS + optional Google Custom Search API
 - Acronym disambiguation for tech context (e.g., `ml` -> Machine Learning)
 - Trusted-source ranking (official/news/authority domains prioritized)
 - Streaming response UX via SSE (`/ask_stream`)
@@ -78,7 +79,11 @@ DEMO_MODE=false
 PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
+GOOGLE_CSE_API_KEY=your_google_custom_search_api_key_here
+GOOGLE_CSE_CX=your_google_custom_search_engine_id_here
 ```
+
+`GOOGLE_CSE_API_KEY` and `GOOGLE_CSE_CX` are optional. If unset, the app still uses DDGS + Google News RSS.
 
 4. Run server:
 

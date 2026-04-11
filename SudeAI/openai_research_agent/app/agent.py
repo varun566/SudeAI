@@ -4,11 +4,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
+import xml.etree.ElementTree as ET
 
 import httpx
 from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
+try:
+    from ddgs import DDGS
+except Exception:  # pragma: no cover
+    from duckduckgo_search import DDGS
 
 try:
     import google.generativeai as genai
@@ -21,6 +25,8 @@ class AgentConfig:
     base_dir: Path
     gemini_api_key: str | None
     gemini_model: str
+    google_cse_api_key: str | None
+    google_cse_cx: str | None
     demo_mode: bool
 
 
@@ -106,6 +112,26 @@ class LiveResearchAgent:
         if low in acronym_map:
             return f"What is {acronym_map[low]}?"
         return q
+
+    def _expand_queries(self, interpreted_question: str) -> list[str]:
+        base = interpreted_question.strip()
+        out = [base]
+        low = base.lower()
+        if low.startswith("who is "):
+            subject = base[7:].strip(" ?!.")
+            if subject:
+                out.extend([f"{subject} biography", f"{subject} profile", f"{subject} wikipedia"])
+                if " " in subject:
+                    out.append(f"{subject} official")
+        if any(term in low for term in ["news", "trending", "latest", "today"]):
+            out.extend([f"{base} reuters", f"{base} ap news", f"{base} bbc"])
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for q in out:
+            if q and q not in seen:
+                seen.add(q)
+                deduped.append(q)
+        return deduped
 
     def _query_keywords(self, interpreted_question: str) -> set[str]:
         normalized = interpreted_question.lower()
@@ -252,6 +278,61 @@ class LiveResearchAgent:
         except Exception:
             return []
 
+    def tool_google_cse_search(self, query: str, max_results: int = 8) -> list[dict[str, str]]:
+        api_key = (self.config.google_cse_api_key or "").strip()
+        cx = (self.config.google_cse_cx or "").strip()
+        if not api_key or not cx:
+            return []
+        try:
+            with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+                res = client.get(
+                    "https://www.googleapis.com/customsearch/v1",
+                    params={"key": api_key, "cx": cx, "q": query, "num": min(max_results, 10)},
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+            if res.status_code >= 400:
+                return []
+            payload = res.json()
+            items = payload.get("items") or []
+            out: list[dict[str, str]] = []
+            for item in items:
+                url = item.get("link", "")
+                if not url:
+                    continue
+                out.append(
+                    {
+                        "title": item.get("title", "Source"),
+                        "url": url,
+                        "snippet": item.get("snippet", ""),
+                    }
+                )
+            return self._dedupe(out)
+        except Exception:
+            return []
+
+    def tool_google_news_rss(self, query: str, max_results: int = 8) -> list[dict[str, str]]:
+        try:
+            rss_url = (
+                "https://news.google.com/rss/search"
+                f"?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
+            )
+            with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+                res = client.get(rss_url, headers={"User-Agent": "Mozilla/5.0"})
+            if res.status_code >= 400:
+                return []
+            root = ET.fromstring(res.text)
+            out: list[dict[str, str]] = []
+            for item in root.findall(".//item")[:max_results]:
+                title = (item.findtext("title") or "Source").strip()
+                url = (item.findtext("link") or "").strip()
+                if not url:
+                    continue
+                snippet = (item.findtext("description") or "").strip()
+                out.append({"title": title, "url": url, "snippet": snippet})
+            return self._dedupe(out)
+        except Exception:
+            return []
+
     def tool_fetch_page(self, url: str, max_chars: int = 2500) -> str:
         try:
             with httpx.Client(timeout=8.0, follow_redirects=True) as client:
@@ -318,6 +399,7 @@ class LiveResearchAgent:
             r"\bas of\s+[A-Za-z]+\s+\d{1,2},\s*\d{4}\b", "", interpreted_question, flags=re.IGNORECASE
         ).strip()
         search_queries = [interpreted_question, normalized_q, f"{normalized_q or interpreted_question} official source"]
+        search_queries.extend(self._expand_queries(interpreted_question))
         if any(term in question.lower() for term in ["news", "headline", "trending", "latest"]):
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             search_queries.extend(
@@ -344,6 +426,11 @@ class LiveResearchAgent:
                 continue
             tool_trace.append(f"web_search('{q[:100]}')")
             sources.extend(self.tool_web_search(q, max_results=8))
+            tool_trace.append(f"google_news_rss('{q[:100]}')")
+            sources.extend(self.tool_google_news_rss(q, max_results=6))
+            if self.config.google_cse_api_key and self.config.google_cse_cx:
+                tool_trace.append(f"google_cse_search('{q[:100]}')")
+                sources.extend(self.tool_google_cse_search(q, max_results=8))
             sources = [s for s in sources if self._is_relevant(s, interpreted_question)]
             sources = self._dedupe(sources)
             if len(sources) >= 5:

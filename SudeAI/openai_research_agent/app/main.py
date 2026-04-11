@@ -21,12 +21,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DEMO_MODE = os.getenv("DEMO_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY")
+GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX")
 
 agent = LiveResearchAgent(
     AgentConfig(
         base_dir=BASE_DIR,
         gemini_api_key=GEMINI_API_KEY,
         gemini_model=GEMINI_MODEL,
+        google_cse_api_key=GOOGLE_CSE_API_KEY,
+        google_cse_cx=GOOGLE_CSE_CX,
         demo_mode=DEMO_MODE,
     )
 )
