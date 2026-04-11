@@ -17,11 +17,32 @@ const toolTraceEl = document.getElementById('tool-trace');
 const timelineEl = document.getElementById('timeline');
 const agentPanelEl = document.getElementById('agent-panel');
 const agentTabsEl = document.getElementById('agent-tabs');
+const themeToggleBtn = document.getElementById('theme-toggle-btn');
 
 const SESSION_KEY = 'live_ai_session_id';
+const THEME_KEY = 'live_ai_theme';
 let sessionId = localStorage.getItem(SESSION_KEY) || null;
 let latestAnswer = '';
 let latestAgentPanels = {};
+
+function setTheme(mode) {
+  const dark = mode === 'dark';
+  document.body.classList.toggle('dark', dark);
+  localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
+  if (themeToggleBtn) {
+    themeToggleBtn.textContent = dark ? 'Light Mode' : 'Dark Mode';
+  }
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'dark' || saved === 'light') {
+    setTheme(saved);
+    return;
+  }
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  setTheme(prefersDark ? 'dark' : 'light');
+}
 
 function trustLabel(tier) {
   if (tier === 'high') return 'High Trust';
@@ -197,6 +218,11 @@ newSessionBtn.addEventListener('click', () => {
   resultEl.classList.add('hidden');
 });
 
+themeToggleBtn?.addEventListener('click', () => {
+  const isDark = document.body.classList.contains('dark');
+  setTheme(isDark ? 'light' : 'dark');
+});
+
 micBtn.addEventListener('click', () => {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
@@ -236,3 +262,4 @@ speakBtn.addEventListener('click', () => {
 });
 
 refreshTimeline();
+initTheme();

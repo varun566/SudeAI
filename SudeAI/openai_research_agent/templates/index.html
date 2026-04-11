@@ -7,11 +7,35 @@
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <div class="liquid-bg" aria-hidden="true">
+      <span class="blob b1"></span>
+      <span class="blob b2"></span>
+      <span class="blob b3"></span>
+      <span class="blob b4"></span>
+    </div>
     <main class="container">
-      <h1>Live AI Assistant</h1>
-      <p class="subtitle">
-        Internet-connected assistant with tool calling, memory, and verification.
-      </p>
+      <header class="hero">
+        <div class="hero-title-row">
+          <h1>Live AI Assistant</h1>
+          <div class="hero-badges">
+            <span class="chip chip-live">Live</span>
+            <span class="chip">Agentic</span>
+            <span class="chip">Verified</span>
+            <button id="theme-toggle-btn" type="button" class="secondary theme-btn">Dark Mode</button>
+          </div>
+        </div>
+        <p class="subtitle">
+          Internet-connected assistant with tool calling, memory, and verification.
+        </p>
+        <div class="hero-pills">
+          <span class="pill">Web Search</span>
+          <span class="pill">Page Fetch</span>
+          <span class="pill">Multi-Agent Panel</span>
+          <span class="pill">Session Memory</span>
+          <span class="pill">Voice Mode</span>
+          <span class="pill">Streaming Output</span>
+        </div>
+      </header>
 
       <form id="ask-form">
         <textarea
@@ -31,10 +55,10 @@
 
       <section id="result" class="result hidden">
         <h2>Session</h2>
-        <pre id="session"></pre>
+        <pre id="session" class="panel"></pre>
 
         <h2>Conversation Timeline</h2>
-        <div id="timeline" class="timeline"></div>
+        <div id="timeline" class="timeline panel"></div>
 
         <h2>Multi-Agent Panel</h2>
         <div class="tabs" id="agent-tabs">
@@ -43,13 +67,13 @@
           <button type="button" class="tab-btn" data-tab="verifier">Verifier</button>
           <button type="button" class="tab-btn" data-tab="summarizer">Summarizer</button>
         </div>
-        <pre id="agent-panel"></pre>
+        <pre id="agent-panel" class="panel"></pre>
 
         <h2>Answer</h2>
-        <pre id="answer"></pre>
+        <pre id="answer" class="panel"></pre>
 
         <h2>Verification</h2>
-        <pre id="verification"></pre>
+        <pre id="verification" class="panel"></pre>
 
         <div class="meta">
           <span id="confidence"></span>
@@ -61,7 +85,7 @@
         <div id="sources" class="source-grid"></div>
 
         <h2>Tool Trace</h2>
-        <pre id="tool-trace"></pre>
+        <pre id="tool-trace" class="panel"></pre>
       </section>
     </main>
 
