@@ -3,3 +3,4 @@
 __pycache__/
 *.pyc
 .DS_Store
+openai_research_agent/data/
