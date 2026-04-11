@@ -166,6 +166,9 @@ class LiveResearchAgent:
 
     def _source_rank(self, source: dict[str, str]) -> int:
         domain = self._domain(source.get("url", ""))
+        # news.google.com is an aggregator, not the original publisher.
+        if domain == "news.google.com":
+            return 1
         trusted_exact = {
             "reuters.com",
             "apnews.com",
