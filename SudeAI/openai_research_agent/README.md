@@ -26,6 +26,9 @@ A live AI assistant that can:
 - Source links + tool trace + conversation timeline visible in UI
 - Simple FastAPI backend + browser UI
 - Strict evidence mode via **Regenerate + Sources** (blocks low-evidence answers)
+- Source snapshot cards (resolved URL + fetched excerpt preview)
+- Session export to Markdown (`Export Session MD`)
+- 15-minute retrieval cache for faster repeated queries
 
 ## Project Structure
 
@@ -117,6 +120,7 @@ Response includes:
 - `verified_at_utc`
 - `tool_trace`
 - `memory_used`
+- `source_snapshots`
 
 ### `GET /history/{session_id}`
 

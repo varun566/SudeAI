@@ -54,6 +54,7 @@ class AskResponse(BaseModel):
     tool_trace: list[str]
     memory_used: int
     agent_panels: dict[str, str]
+    source_snapshots: list[dict[str, str]]
 
 
 class HistoryResponse(BaseModel):
@@ -61,7 +62,7 @@ class HistoryResponse(BaseModel):
     messages: list[dict[str, str]]
 
 
-app = FastAPI(title="Live AI Assistant", version="2.4.0")
+app = FastAPI(title="Live AI Assistant", version="2.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,6 +102,7 @@ def _build_response(question: str, session_id: str, strict_sources: bool = False
         tool_trace=result["tool_trace"],
         memory_used=result["memory_used"],
         agent_panels=result["agent_panels"],
+        source_snapshots=result.get("source_snapshots", []),
     )
 
 
@@ -144,6 +146,7 @@ async def ask_stream(question: str, session_id: str | None = None, strict_source
                 "model": "error",
                 "tool_trace": ["stream_error"],
                 "memory_used": 0,
+                "source_snapshots": [],
                 "agent_panels": {
                     "retriever": "No retrieval completed due to request error.",
                     "analyst": detail,

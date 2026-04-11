@@ -22,6 +22,8 @@ const themeToggleBtn = document.getElementById('theme-toggle-btn');
 const intensitySelect = document.getElementById('liquid-intensity');
 const copyAnswerBtn = document.getElementById('copy-answer-btn');
 const downloadAnswerBtn = document.getElementById('download-answer-btn');
+const exportSessionBtn = document.getElementById('export-session-btn');
+const sourceSnapshotsEl = document.getElementById('source-snapshots');
 
 const SESSION_KEY = 'live_ai_session_id';
 const THEME_KEY = 'live_ai_theme';
@@ -30,6 +32,7 @@ let sessionId = localStorage.getItem(SESSION_KEY) || null;
 let latestAnswer = '';
 let latestAgentPanels = {};
 let lastQuestion = '';
+let latestPayload = null;
 
 function setTheme(mode) {
   const dark = mode === 'dark';
@@ -96,6 +99,38 @@ function renderSources(sources) {
   });
 }
 
+function renderSourceSnapshots(snapshots) {
+  sourceSnapshotsEl.innerHTML = '';
+  if (!snapshots || snapshots.length === 0) {
+    sourceSnapshotsEl.innerHTML = '<div class="timeline-empty">No source snapshots available.</div>';
+    return;
+  }
+  snapshots.forEach((snap) => {
+    const card = document.createElement('div');
+    card.className = 'snapshot-card';
+
+    const title = document.createElement('a');
+    title.href = snap.url;
+    title.target = '_blank';
+    title.rel = 'noopener noreferrer';
+    title.className = 'source-title';
+    title.textContent = snap.title || snap.url;
+
+    const meta = document.createElement('div');
+    meta.className = 'source-meta';
+    meta.textContent = snap.domain || '';
+
+    const excerpt = document.createElement('div');
+    excerpt.className = 'snapshot-excerpt';
+    excerpt.textContent = snap.excerpt || '';
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(excerpt);
+    sourceSnapshotsEl.appendChild(card);
+  });
+}
+
 function renderAgentPanel(tab) {
   const text = latestAgentPanels?.[tab] || 'No data.';
   agentPanelEl.textContent = text;
@@ -146,6 +181,7 @@ async function refreshTimeline() {
 }
 
 function applyFinalData(data) {
+  latestPayload = data;
   latestAnswer = data.answer || '';
   answerEl.textContent = latestAnswer;
 
@@ -159,6 +195,7 @@ function applyFinalData(data) {
   modelEl.textContent = `Model: ${data.model}`;
   toolTraceEl.textContent = (data.tool_trace || []).join('\n') || 'No tools called.';
   renderSources(data.sources || []);
+  renderSourceSnapshots(data.source_snapshots || []);
 
   latestAgentPanels = data.agent_panels || {};
   const activeTab = agentTabsEl.querySelector('.tab-btn.active')?.dataset.tab || 'retriever';
@@ -298,6 +335,65 @@ downloadAnswerBtn?.addEventListener('click', () => {
   a.remove();
   URL.revokeObjectURL(url);
   statusEl.textContent = 'Answer downloaded.';
+});
+
+exportSessionBtn?.addEventListener('click', async () => {
+  if (!sessionId || !latestPayload) {
+    statusEl.textContent = 'Run at least one question before exporting.';
+    return;
+  }
+  try {
+    const response = await fetch(`/history/${encodeURIComponent(sessionId)}`);
+    const history = response.ok ? await response.json() : { messages: [] };
+    const lines = [];
+    lines.push('# Live AI Assistant Session Report');
+    lines.push('');
+    lines.push(`- Session ID: ${sessionId}`);
+    lines.push(`- Exported (UTC): ${new Date().toISOString()}`);
+    lines.push('');
+    lines.push('## Latest Question');
+    lines.push('');
+    lines.push(questionEl.value.trim() || lastQuestion || '');
+    lines.push('');
+    lines.push('## Latest Answer');
+    lines.push('');
+    lines.push(latestPayload.answer || '');
+    lines.push('');
+    lines.push('## Verification');
+    lines.push('');
+    lines.push(`- Confidence: ${latestPayload.confidence || ''}`);
+    lines.push(`- Verified at (UTC): ${latestPayload.verified_at_utc || ''}`);
+    lines.push('');
+    lines.push(latestPayload.verification_notes || '');
+    lines.push('');
+    lines.push('## Sources');
+    lines.push('');
+    (latestPayload.sources || []).forEach((s) => {
+      lines.push(`- [${s.title || s.url}](${s.url})`);
+    });
+    lines.push('');
+    lines.push('## Conversation Timeline');
+    lines.push('');
+    (history.messages || []).forEach((m) => {
+      lines.push(`### ${String(m.role || 'assistant').toUpperCase()}`);
+      lines.push('');
+      lines.push(m.content || '');
+      lines.push('');
+    });
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `session-${sessionId}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    statusEl.textContent = 'Session markdown exported.';
+  } catch {
+    statusEl.textContent = 'Export failed.';
+  }
 });
 
 micBtn.addEventListener('click', () => {

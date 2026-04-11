@@ -3,6 +3,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import time
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 import xml.etree.ElementTree as ET
@@ -83,12 +84,27 @@ class LiveResearchAgent:
     def __init__(self, config: AgentConfig):
         self.config = config
         self.memory = MemoryStore(config.base_dir / "data" / "memory.db")
+        self.cache_ttl_seconds = 900
+        self._cache: dict[str, tuple[float, Any]] = {}
         self.gemini_client = None
         if genai is not None and config.gemini_api_key:
             try:
                 self.gemini_client = genai.Client(api_key=config.gemini_api_key)
             except Exception:
                 self.gemini_client = None
+
+    def _cache_get(self, key: str) -> Any | None:
+        item = self._cache.get(key)
+        if not item:
+            return None
+        ts, value = item
+        if (time.time() - ts) > self.cache_ttl_seconds:
+            self._cache.pop(key, None)
+            return None
+        return value
+
+    def _cache_set(self, key: str, value: Any) -> None:
+        self._cache[key] = (time.time(), value)
 
     def _domain(self, url: str) -> str:
         try:
@@ -255,6 +271,10 @@ class LiveResearchAgent:
         return []
 
     def tool_web_search(self, query: str, max_results: int = 8) -> list[dict[str, str]]:
+        cache_key = f"web:{query}:{max_results}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
         try:
             with DDGS() as ddgs:
                 results: list[dict[str, Any]] = []
@@ -281,11 +301,16 @@ class LiveResearchAgent:
                 snippet = item.get("body") or item.get("snippet") or item.get("description") or ""
                 sources.append({"title": item.get("title", "Source"), "url": url, "snippet": snippet})
             sources = [s for s in self._dedupe(sources) if not self._is_low_quality(s)]
+            self._cache_set(cache_key, sources)
             return sources
         except Exception:
             return []
 
     def tool_google_cse_search(self, query: str, max_results: int = 8) -> list[dict[str, str]]:
+        cache_key = f"cse:{query}:{max_results}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
         api_key = (self.config.google_cse_api_key or "").strip()
         cx = (self.config.google_cse_cx or "").strip()
         if not api_key or not cx:
@@ -313,11 +338,17 @@ class LiveResearchAgent:
                         "snippet": item.get("snippet", ""),
                     }
                 )
-            return self._dedupe(out)
+            out = self._dedupe(out)
+            self._cache_set(cache_key, out)
+            return out
         except Exception:
             return []
 
     def tool_google_news_rss(self, query: str, max_results: int = 8) -> list[dict[str, str]]:
+        cache_key = f"gnrss:{query}:{max_results}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
         try:
             rss_url = (
                 "https://news.google.com/rss/search"
@@ -336,23 +367,32 @@ class LiveResearchAgent:
                     continue
                 snippet = (item.findtext("description") or "").strip()
                 out.append({"title": title, "url": url, "snippet": snippet})
-            return self._dedupe(out)
+            out = self._dedupe(out)
+            self._cache_set(cache_key, out)
+            return out
         except Exception:
             return []
 
-    def tool_fetch_page(self, url: str, max_chars: int = 2500) -> str:
+    def tool_fetch_page(self, url: str, max_chars: int = 2500) -> tuple[str, str]:
+        cache_key = f"fetch:{url}:{max_chars}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
         try:
             with httpx.Client(timeout=8.0, follow_redirects=True) as client:
                 res = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
             if res.status_code >= 400:
-                return ""
+                return "", url
             soup = BeautifulSoup(res.text, "html.parser")
             for t in soup(["script", "style", "noscript"]):
                 t.decompose()
             text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
-            return text[:max_chars]
+            final_url = str(getattr(res, "url", url))
+            payload = (text[:max_chars], final_url)
+            self._cache_set(cache_key, payload)
+            return payload
         except Exception:
-            return ""
+            return "", url
 
     def _gemini_models(self) -> list[str]:
         base = self.config.gemini_model.strip()
@@ -436,14 +476,34 @@ class LiveResearchAgent:
             sources = self._dedupe(sources + self._fallback_reference_sources(interpreted_question))
 
         fetch_blocks: list[str] = []
+        source_snapshots: list[dict[str, str]] = []
         for src in sources[:3]:
-            tool_trace.append(f"fetch_page('{src['url']}')")
-            text = self.tool_fetch_page(src["url"])
+            original_url = src["url"]
+            tool_trace.append(f"fetch_page('{original_url}')")
+            text, resolved_url = self.tool_fetch_page(original_url)
+            if resolved_url and resolved_url != original_url:
+                src["url"] = resolved_url
+                tool_trace.append(f"resolved_url('{original_url}' -> '{resolved_url}')")
+            effective_text = text.strip()
+            if not effective_text and src.get("snippet"):
+                effective_text = src["snippet"]
+            if effective_text:
+                snapshot_excerpt = effective_text[:420]
+                source_snapshots.append(
+                    {
+                        "title": src.get("title", "Source"),
+                        "url": src.get("url", original_url),
+                        "domain": self._domain(src.get("url", original_url)),
+                        "excerpt": snapshot_excerpt,
+                    }
+                )
             if text:
                 fetch_blocks.append(f"Source: {src['title']} ({src['url']})\n{text}")
             elif src.get("snippet"):
                 # Fallback to search snippet when full page fetch is blocked.
                 fetch_blocks.append(f"Source: {src['title']} ({src['url']})\n{src['snippet']}")
+
+        sources = self._dedupe(sources)
 
         if len(sources) < 3:
             tool_trace.append("source_policy: insufficient_sources")
@@ -502,6 +562,7 @@ class LiveResearchAgent:
                 "tool_trace": tool_trace,
                 "memory_used": len(memory),
                 "agent_panels": agent_panels,
+                "source_snapshots": source_snapshots,
             }
 
         answer_prompt = (
@@ -582,4 +643,5 @@ class LiveResearchAgent:
             "tool_trace": tool_trace,
             "memory_used": len(memory),
             "agent_panels": agent_panels,
+            "source_snapshots": source_snapshots,
         }
