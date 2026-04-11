@@ -39,6 +39,7 @@ agent = LiveResearchAgent(
 class AskRequest(BaseModel):
     question: str = Field(min_length=3, max_length=4000)
     session_id: str | None = None
+    strict_sources: bool = False
 
 
 class AskResponse(BaseModel):
@@ -60,7 +61,7 @@ class HistoryResponse(BaseModel):
     messages: list[dict[str, str]]
 
 
-app = FastAPI(title="Live AI Assistant", version="2.3.0")
+app = FastAPI(title="Live AI Assistant", version="2.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,9 +80,9 @@ async def home(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
-def _build_response(question: str, session_id: str) -> AskResponse:
+def _build_response(question: str, session_id: str, strict_sources: bool = False) -> AskResponse:
     try:
-        result = agent.run(question=question, session_id=session_id)
+        result = agent.run(question=question, session_id=session_id, strict_sources=strict_sources)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Assistant error: {str(exc)}")
 
@@ -107,11 +108,11 @@ async def ask(payload: AskRequest) -> AskResponse:
         raise HTTPException(status_code=400, detail="Question is required.")
 
     session_id = payload.session_id or f"session-{uuid.uuid4().hex[:12]}"
-    return _build_response(question=question, session_id=session_id)
+    return _build_response(question=question, session_id=session_id, strict_sources=payload.strict_sources)
 
 
 @app.get("/ask_stream")
-async def ask_stream(question: str, session_id: str | None = None) -> StreamingResponse:
+async def ask_stream(question: str, session_id: str | None = None, strict_sources: bool = False) -> StreamingResponse:
     q = (question or "").strip()
     if not q:
         raise HTTPException(status_code=400, detail="Question is required.")
@@ -119,7 +120,7 @@ async def ask_stream(question: str, session_id: str | None = None) -> StreamingR
 
     def event_stream() -> Iterator[str]:
         yield "event: status\ndata: researching\n\n"
-        response = _build_response(question=q, session_id=sid)
+        response = _build_response(question=q, session_id=sid, strict_sources=strict_sources)
         payload = response.model_dump()
         answer = payload.get("answer", "")
         for i in range(0, len(answer), 56):

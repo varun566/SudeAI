@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
     from duckduckgo_search import DDGS
 
 try:
-    import google.generativeai as genai
+    from google import genai
 except Exception:  # pragma: no cover
     genai = None
 
@@ -83,8 +83,12 @@ class LiveResearchAgent:
     def __init__(self, config: AgentConfig):
         self.config = config
         self.memory = MemoryStore(config.base_dir / "data" / "memory.db")
+        self.gemini_client = None
         if genai is not None and config.gemini_api_key:
-            genai.configure(api_key=config.gemini_api_key)
+            try:
+                self.gemini_client = genai.Client(api_key=config.gemini_api_key)
+            except Exception:
+                self.gemini_client = None
 
     def _domain(self, url: str) -> str:
         try:
@@ -349,23 +353,13 @@ class LiveResearchAgent:
 
     def _gemini_models(self) -> list[str]:
         base = self.config.gemini_model.strip()
-        ordered = [base, f"models/{base}", "gemini-2.5-flash", "models/gemini-2.5-flash", "gemini-2.0-flash"]
+        ordered = [base, base.replace("models/", "", 1), "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         seen: set[str] = set()
         unique: list[str] = []
         for m in ordered:
             if m and m not in seen:
                 seen.add(m)
                 unique.append(m)
-        if genai is not None:
-            try:
-                for model in genai.list_models():
-                    name = getattr(model, "name", "")
-                    methods = getattr(model, "supported_generation_methods", []) or []
-                    if "generateContent" in methods and name and name not in seen:
-                        seen.add(name)
-                        unique.append(name)
-            except Exception:
-                pass
         return unique
 
     def _generate(self, prompt: str) -> tuple[str, str]:
@@ -374,22 +368,21 @@ class LiveResearchAgent:
                 "Demo mode: live assistant response generated without external model call.",
                 "demo-simulated-research-agent",
             )
-        if genai is None or not self.config.gemini_api_key:
+        if self.gemini_client is None or not self.config.gemini_api_key:
             raise RuntimeError("Gemini is not configured.")
         last_error: Exception | None = None
         for model_name in self._gemini_models():
             try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
+                response = self.gemini_client.models.generate_content(model=model_name, contents=prompt)
                 text = (getattr(response, "text", "") or "").strip()
                 if text:
-                    return text, model_name.replace("models/", "", 1)
+                    return text, model_name
             except Exception as exc:
                 last_error = exc
                 continue
         raise RuntimeError(str(last_error) if last_error else "No Gemini model available.")
 
-    def run(self, question: str, session_id: str) -> dict[str, Any]:
+    def run(self, question: str, session_id: str, strict_sources: bool = False) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         memory = self.memory.recent(session_id, limit=8)
         memory_blob = "\n".join([f"{m['role']}: {m['content'][:280]}" for m in memory]) or "No prior chat history."
@@ -454,6 +447,59 @@ class LiveResearchAgent:
 
         source_lines = "\n".join([f"- {s['title']}: {s['url']}" for s in sources[:8]]) or "- No sources found."
         fetched_text = "\n\n".join(fetch_blocks) or "No page extracts available."
+
+        if strict_sources and (len(sources) < 3 or len(fetch_blocks) < 2):
+            tool_trace.append("strict_source_policy: blocked_low_evidence")
+            answer = (
+                "Insufficient high-quality sources for a reliable answer.\n\n"
+                f"Source count: {len(sources)} | Extracted pages/snippets: {len(fetch_blocks)}\n"
+                f"Data Freshness: {now}"
+            )
+            verification_notes = (
+                "Confidence: High\n"
+                "Verification Notes:\n"
+                "- Strict source mode is enabled.\n"
+                "- Fewer than 3 relevant sources or fewer than 2 extracted evidence blocks were available.\n"
+                "- Returning a blocked answer is safer than generating unsupported claims."
+            )
+            confidence = "High"
+            used_model = "source-policy"
+            self.memory.save(session_id, "user", question)
+            self.memory.save(session_id, "assistant", answer)
+
+            cleaned_sources = []
+            for s in self._dedupe(sources):
+                cleaned_sources.append(
+                    {
+                        "title": s["title"],
+                        "url": s["url"],
+                        "domain": self._domain(s["url"]),
+                        "trust_tier": self._trust_tier(s),
+                    }
+                )
+
+            retriever_output = (
+                f"Queries executed: {len([t for t in tool_trace if t.startswith('web_search')])}\n"
+                f"Sources collected: {len(cleaned_sources)}\n"
+                f"Top domains: {', '.join(sorted({s['domain'] for s in cleaned_sources[:5] if s.get('domain')})) or 'none'}"
+            )
+            agent_panels = {
+                "retriever": retriever_output,
+                "analyst": answer,
+                "verifier": verification_notes,
+                "summarizer": "Strict mode blocked output due to weak evidence.",
+            }
+            return {
+                "answer": answer,
+                "verification_notes": verification_notes,
+                "confidence": confidence,
+                "sources": cleaned_sources,
+                "model": used_model,
+                "verified_at_utc": now,
+                "tool_trace": tool_trace,
+                "memory_used": len(memory),
+                "agent_panels": agent_panels,
+            }
 
         answer_prompt = (
             f"Current UTC time: {now}\n"

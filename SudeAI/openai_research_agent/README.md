@@ -25,6 +25,7 @@ A live AI assistant that can:
 - Session memory (SQLite) across turns
 - Source links + tool trace + conversation timeline visible in UI
 - Simple FastAPI backend + browser UI
+- Strict evidence mode via **Regenerate + Sources** (blocks low-evidence answers)
 
 ## Project Structure
 
@@ -127,6 +128,9 @@ Streams assistant output using Server-Sent Events:
 - `status`
 - `chunk`
 - `final`
+
+Optional query flag:
+- `strict_sources=true` to require stronger source coverage before answering
 
 ## Notes
 - This app requires internet access at runtime for web search.

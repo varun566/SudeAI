@@ -1,6 +1,7 @@
 const form = document.getElementById('ask-form');
 const questionEl = document.getElementById('question');
 const submitBtn = document.getElementById('submit-btn');
+const regenerateBtn = document.getElementById('regenerate-btn');
 const micBtn = document.getElementById('mic-btn');
 const speakBtn = document.getElementById('speak-btn');
 const newSessionBtn = document.getElementById('new-session-btn');
@@ -28,6 +29,7 @@ const LIQUID_INTENSITY_KEY = 'live_ai_liquid_intensity';
 let sessionId = localStorage.getItem(SESSION_KEY) || null;
 let latestAnswer = '';
 let latestAgentPanels = {};
+let lastQuestion = '';
 
 function setTheme(mode) {
   const dark = mode === 'dark';
@@ -165,10 +167,11 @@ function applyFinalData(data) {
   refreshTimeline();
 }
 
-function runStream(question) {
+function runStream(question, options = {}) {
   return new Promise((resolve, reject) => {
     const params = new URLSearchParams({ question });
     if (sessionId) params.set('session_id', sessionId);
+    if (options.strictSources) params.set('strict_sources', 'true');
     const es = new EventSource(`/ask_stream?${params.toString()}`);
 
     let streamed = '';
@@ -213,16 +216,40 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const question = questionEl.value.trim();
   if (!question) return;
+  lastQuestion = question;
 
   submitBtn.disabled = true;
+  if (regenerateBtn) regenerateBtn.disabled = true;
   resultEl.classList.add('hidden');
 
   try {
-    await runStream(question);
+    await runStream(question, { strictSources: false });
   } catch (error) {
     statusEl.textContent = `Error: ${error.message}`;
   } finally {
     submitBtn.disabled = false;
+    if (regenerateBtn) regenerateBtn.disabled = false;
+  }
+});
+
+regenerateBtn?.addEventListener('click', async () => {
+  const question = (questionEl.value || lastQuestion || '').trim();
+  if (!question) {
+    statusEl.textContent = 'Enter a question first.';
+    return;
+  }
+  lastQuestion = question;
+  submitBtn.disabled = true;
+  regenerateBtn.disabled = true;
+  resultEl.classList.add('hidden');
+  statusEl.textContent = 'Running stricter retrieval mode...';
+  try {
+    await runStream(question, { strictSources: true });
+  } catch (error) {
+    statusEl.textContent = `Error: ${error.message}`;
+  } finally {
+    submitBtn.disabled = false;
+    regenerateBtn.disabled = false;
   }
 });
 
