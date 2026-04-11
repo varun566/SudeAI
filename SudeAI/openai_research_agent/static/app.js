@@ -23,6 +23,7 @@ const intensitySelect = document.getElementById('liquid-intensity');
 const copyAnswerBtn = document.getElementById('copy-answer-btn');
 const downloadAnswerBtn = document.getElementById('download-answer-btn');
 const exportSessionBtn = document.getElementById('export-session-btn');
+const shareReportBtn = document.getElementById('share-report-btn');
 const sourceSnapshotsEl = document.getElementById('source-snapshots');
 
 const SESSION_KEY = 'live_ai_session_id';
@@ -33,6 +34,8 @@ let latestAnswer = '';
 let latestAgentPanels = {};
 let lastQuestion = '';
 let latestPayload = null;
+let activeRecognition = null;
+let voiceRetryCount = 0;
 
 function setTheme(mode) {
   const dark = mode === 'dark';
@@ -95,6 +98,15 @@ function renderSources(sources) {
 
     card.appendChild(title);
     card.appendChild(meta);
+    if (source.domain === 'news.google.com' && source.publisher_search_url) {
+      const helper = document.createElement('a');
+      helper.href = source.publisher_search_url;
+      helper.target = '_blank';
+      helper.rel = 'noopener noreferrer';
+      helper.className = 'source-helper-link';
+      helper.textContent = 'Open likely publisher';
+      card.appendChild(helper);
+    }
     sourcesEl.appendChild(card);
   });
 }
@@ -396,13 +408,60 @@ exportSessionBtn?.addEventListener('click', async () => {
   }
 });
 
-micBtn.addEventListener('click', () => {
+async function createPublicReport() {
+  if (!sessionId || !latestPayload) {
+    statusEl.textContent = 'Run at least one question before sharing.';
+    return;
+  }
+  try {
+    const historyRes = await fetch(`/history/${encodeURIComponent(sessionId)}`);
+    const historyPayload = historyRes.ok ? await historyRes.json() : { messages: [] };
+    const body = {
+      session_id: sessionId,
+      question: questionEl.value.trim() || lastQuestion || '',
+      answer: latestPayload.answer || '',
+      verification_notes: latestPayload.verification_notes || '',
+      confidence: latestPayload.confidence || '',
+      sources: latestPayload.sources || [],
+      history: historyPayload.messages || [],
+    };
+    const response = await fetch('/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error('Share request failed');
+    const data = await response.json();
+    const fullUrl = `${window.location.origin}${data.public_url}`;
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      statusEl.textContent = `Public report created and copied: ${fullUrl}`;
+    } catch {
+      statusEl.textContent = `Public report created: ${fullUrl}`;
+    }
+  } catch {
+    statusEl.textContent = 'Public report creation failed.';
+  }
+}
+
+shareReportBtn?.addEventListener('click', createPublicReport);
+
+function stopVoiceInput() {
+  if (activeRecognition) {
+    try {
+      activeRecognition.stop();
+    } catch {}
+  }
+}
+
+function startVoiceInput() {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
     statusEl.textContent = 'Voice input is not supported in this browser.';
     return;
   }
   const rec = new Recognition();
+  activeRecognition = rec;
   rec.lang = 'en-US';
   rec.interimResults = false;
   rec.maxAlternatives = 1;
@@ -411,12 +470,35 @@ micBtn.addEventListener('click', () => {
     const text = event.results?.[0]?.[0]?.transcript || '';
     questionEl.value = text;
     statusEl.textContent = 'Voice captured.';
+    voiceRetryCount = 0;
   };
-  rec.onerror = () => {
+  rec.onerror = (event) => {
+    const err = event?.error || 'unknown';
+    if ((err === 'no-speech' || err === 'aborted') && voiceRetryCount < 1) {
+      voiceRetryCount += 1;
+      statusEl.textContent = 'Retrying voice input...';
+      setTimeout(() => startVoiceInput(), 280);
+      return;
+    }
     statusEl.textContent = 'Voice input error.';
   };
+  rec.onend = () => {
+    activeRecognition = null;
+  };
   rec.start();
+}
+
+micBtn?.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  startVoiceInput();
 });
+micBtn?.addEventListener('mouseup', stopVoiceInput);
+micBtn?.addEventListener('mouseleave', stopVoiceInput);
+micBtn?.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  startVoiceInput();
+});
+micBtn?.addEventListener('touchend', stopVoiceInput);
 
 speakBtn.addEventListener('click', () => {
   if (!latestAnswer) {

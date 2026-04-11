@@ -112,6 +112,19 @@ class LiveResearchAgent:
         except Exception:
             return ""
 
+    def _clean_title(self, title: str) -> str:
+        t = (title or "").strip()
+        t = re.sub(r"\s+", " ", t)
+        if "Top Stories" in t:
+            t = t.split("Top Stories", 1)[0].strip(" -|:")
+        if len(t) > 140:
+            t = t[:137].rstrip() + "..."
+        return t or "Source"
+
+    def _publisher_search_url(self, title: str) -> str:
+        q = quote_plus((title or "").strip())
+        return f"https://www.google.com/search?q={q}"
+
     def _is_low_quality(self, source: dict[str, str]) -> bool:
         text = " ".join(
             [source.get("title", "").lower(), source.get("url", "").lower(), source.get("snippet", "").lower()]
@@ -226,7 +239,7 @@ class LiveResearchAgent:
             if not u or u in seen:
                 continue
             seen.add(u)
-            out.append({"title": s.get("title", "Source"), "url": u, "snippet": s.get("snippet", "")})
+            out.append({"title": self._clean_title(s.get("title", "Source")), "url": u, "snippet": s.get("snippet", "")})
         out.sort(key=self._source_rank)
         return out
 
@@ -495,6 +508,7 @@ class LiveResearchAgent:
                         "url": src.get("url", original_url),
                         "domain": self._domain(src.get("url", original_url)),
                         "excerpt": snapshot_excerpt,
+                        "publisher_search_url": self._publisher_search_url(src.get("title", "Source")),
                     }
                 )
             if text:
@@ -538,6 +552,7 @@ class LiveResearchAgent:
                         "url": s["url"],
                         "domain": self._domain(s["url"]),
                         "trust_tier": self._trust_tier(s),
+                        "publisher_search_url": self._publisher_search_url(s["title"]),
                     }
                 )
 
@@ -616,6 +631,7 @@ class LiveResearchAgent:
                     "url": s["url"],
                     "domain": self._domain(s["url"]),
                     "trust_tier": self._trust_tier(s),
+                    "publisher_search_url": self._publisher_search_url(s["title"]),
                 }
             )
 

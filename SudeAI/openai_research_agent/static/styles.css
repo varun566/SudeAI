@@ -510,6 +510,14 @@ body.dark .source-card {
   color: var(--muted);
 }
 
+.source-helper-link {
+  margin-top: 8px;
+  display: inline-block;
+  font-size: 0.82rem;
+  color: #0f5fca;
+  text-decoration: underline;
+}
+
 .snapshot-excerpt {
   margin-top: 8px;
   color: var(--ink-soft);

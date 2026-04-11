@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from html import escape
 from pathlib import Path
 from typing import Iterator
 
@@ -62,7 +63,23 @@ class HistoryResponse(BaseModel):
     messages: list[dict[str, str]]
 
 
-app = FastAPI(title="Live AI Assistant", version="2.5.0")
+class ReportCreateRequest(BaseModel):
+    session_id: str
+    question: str
+    answer: str
+    verification_notes: str
+    confidence: str
+    sources: list[dict[str, str]]
+    history: list[dict[str, str]]
+
+
+class ReportCreateResponse(BaseModel):
+    report_id: str
+    public_url: str
+
+
+app = FastAPI(title="Live AI Assistant", version="2.6.0")
+PUBLIC_REPORTS: dict[str, dict] = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -164,3 +181,61 @@ async def ask_stream(question: str, session_id: str | None = None, strict_source
 async def history(session_id: str) -> HistoryResponse:
     messages = agent.memory.recent(session_id, limit=30)
     return HistoryResponse(session_id=session_id, messages=messages)
+
+
+@app.post("/reports", response_model=ReportCreateResponse)
+async def create_report(payload: ReportCreateRequest) -> ReportCreateResponse:
+    report_id = f"rep-{uuid.uuid4().hex[:10]}"
+    PUBLIC_REPORTS[report_id] = payload.model_dump()
+    return ReportCreateResponse(report_id=report_id, public_url=f"/r/{report_id}")
+
+
+@app.get("/r/{report_id}", response_class=HTMLResponse)
+async def public_report(report_id: str) -> HTMLResponse:
+    report = PUBLIC_REPORTS.get(report_id)
+    if not report:
+        return HTMLResponse(status_code=404, content="<h1>Report not found</h1>")
+
+    history_html = ""
+    for msg in report.get("history", []):
+        role = escape(str(msg.get("role", "assistant")).upper())
+        content = escape(str(msg.get("content", "")))
+        history_html += f"<h3>{role}</h3><pre>{content}</pre>"
+
+    sources_html = ""
+    for src in report.get("sources", []):
+        title = escape(str(src.get("title") or src.get("url") or "Source"))
+        url = escape(str(src.get("url") or ""))
+        sources_html += f'<li><a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a></li>'
+
+    html = f"""
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live AI Assistant Report</title>
+    <style>
+      body {{ font-family: Manrope, Arial, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; }}
+      pre {{ white-space: pre-wrap; background: #f5f7f7; border: 1px solid #dde4e3; border-radius: 10px; padding: 12px; }}
+      a {{ color: #0f5fca; }}
+    </style>
+  </head>
+  <body>
+    <h1>Live AI Assistant Public Report</h1>
+    <p><strong>Session:</strong> {escape(report.get("session_id", ""))}</p>
+    <h2>Question</h2>
+    <pre>{escape(report.get("question", ""))}</pre>
+    <h2>Answer</h2>
+    <pre>{escape(report.get("answer", ""))}</pre>
+    <h2>Verification</h2>
+    <p><strong>Confidence:</strong> {escape(report.get("confidence", ""))}</p>
+    <pre>{escape(report.get("verification_notes", ""))}</pre>
+    <h2>Sources</h2>
+    <ul>{sources_html}</ul>
+    <h2>Timeline</h2>
+    {history_html}
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html)
