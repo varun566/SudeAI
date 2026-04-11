@@ -18,9 +18,13 @@ const timelineEl = document.getElementById('timeline');
 const agentPanelEl = document.getElementById('agent-panel');
 const agentTabsEl = document.getElementById('agent-tabs');
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
+const intensitySelect = document.getElementById('liquid-intensity');
+const copyAnswerBtn = document.getElementById('copy-answer-btn');
+const downloadAnswerBtn = document.getElementById('download-answer-btn');
 
 const SESSION_KEY = 'live_ai_session_id';
 const THEME_KEY = 'live_ai_theme';
+const LIQUID_INTENSITY_KEY = 'live_ai_liquid_intensity';
 let sessionId = localStorage.getItem(SESSION_KEY) || null;
 let latestAnswer = '';
 let latestAgentPanels = {};
@@ -42,6 +46,18 @@ function initTheme() {
   }
   const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   setTheme(prefersDark ? 'dark' : 'light');
+}
+
+function setLiquidIntensity(level) {
+  const safe = ['low', 'medium', 'high'].includes(level) ? level : 'medium';
+  document.body.dataset.liquid = safe;
+  localStorage.setItem(LIQUID_INTENSITY_KEY, safe);
+  if (intensitySelect) intensitySelect.value = safe;
+}
+
+function initLiquidIntensity() {
+  const saved = localStorage.getItem(LIQUID_INTENSITY_KEY) || 'medium';
+  setLiquidIntensity(saved);
 }
 
 function trustLabel(tier) {
@@ -223,6 +239,40 @@ themeToggleBtn?.addEventListener('click', () => {
   setTheme(isDark ? 'light' : 'dark');
 });
 
+intensitySelect?.addEventListener('change', () => {
+  setLiquidIntensity(intensitySelect.value);
+});
+
+copyAnswerBtn?.addEventListener('click', async () => {
+  if (!latestAnswer) {
+    statusEl.textContent = 'No answer to copy yet.';
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(latestAnswer);
+    statusEl.textContent = 'Answer copied.';
+  } catch {
+    statusEl.textContent = 'Copy failed on this browser.';
+  }
+});
+
+downloadAnswerBtn?.addEventListener('click', () => {
+  if (!latestAnswer) {
+    statusEl.textContent = 'No answer to download yet.';
+    return;
+  }
+  const blob = new Blob([latestAnswer], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'assistant-answer.txt';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  statusEl.textContent = 'Answer downloaded.';
+});
+
 micBtn.addEventListener('click', () => {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
@@ -263,3 +313,4 @@ speakBtn.addEventListener('click', () => {
 
 refreshTimeline();
 initTheme();
+initLiquidIntensity();

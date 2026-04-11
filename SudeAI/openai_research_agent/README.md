@@ -14,6 +14,10 @@ A live AI assistant that can:
 - Voice mode (browser speech-to-text + text-to-speech)
 - Multi-agent tabbed panel (Retriever, Analyst, Verifier, Summarizer)
 - Source trust cards (domain + trust tier)
+- Query relevance filtering to reduce off-topic search results
+- Snippet fallback when a page blocks full fetch
+- Premium liquid UI controls (low/medium/high intensity)
+- One-click answer export (copy + download)
 - Two-pass flow:
   - primary answer generation
   - verification/fact-check pass
@@ -55,7 +59,7 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# then edit .env and add your OPENAI_API_KEY
+# then edit .env and add your GEMINI_API_KEY
 ```
 
 For classroom/demo-only runs without API credits:
@@ -73,7 +77,7 @@ To use Gemini free tier for live results:
 DEMO_MODE=false
 PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 4. Run server:

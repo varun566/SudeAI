@@ -56,7 +56,7 @@ class HistoryResponse(BaseModel):
     messages: list[dict[str, str]]
 
 
-app = FastAPI(title="Live AI Assistant", version="2.1.0")
+app = FastAPI(title="Live AI Assistant", version="2.3.0")
 
 app.add_middleware(
     CORSMiddleware,

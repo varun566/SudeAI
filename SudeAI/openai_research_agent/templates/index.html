@@ -21,6 +21,14 @@
             <span class="chip chip-live">Live</span>
             <span class="chip">Agentic</span>
             <span class="chip">Verified</span>
+            <label class="intensity-wrap" for="liquid-intensity">
+              Liquid
+              <select id="liquid-intensity" class="intensity-select">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
             <button id="theme-toggle-btn" type="button" class="secondary theme-btn">Dark Mode</button>
           </div>
         </div>
@@ -70,6 +78,10 @@
         <pre id="agent-panel" class="panel"></pre>
 
         <h2>Answer</h2>
+        <div class="action-row answer-actions">
+          <button id="copy-answer-btn" type="button" class="secondary">Copy Answer</button>
+          <button id="download-answer-btn" type="button" class="secondary">Download TXT</button>
+        </div>
         <pre id="answer" class="panel"></pre>
 
         <h2>Verification</h2>

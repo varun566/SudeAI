@@ -61,6 +61,21 @@ body.dark {
   animation: morph 12s ease-in-out infinite, drift 18s linear infinite;
 }
 
+body[data-liquid="low"] .blob {
+  opacity: 0.2;
+  animation-duration: 18s, 26s;
+}
+
+body[data-liquid="medium"] .blob {
+  opacity: 0.34;
+  animation-duration: 13s, 20s;
+}
+
+body[data-liquid="high"] .blob {
+  opacity: 0.5;
+  animation-duration: 10s, 14s;
+}
+
 .b1 {
   top: -12vmax;
   left: -8vmax;
@@ -172,6 +187,40 @@ h2 {
   flex-wrap: wrap;
 }
 
+.intensity-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(236, 244, 242, 0.9);
+  border: 1px solid var(--border);
+}
+
+body.dark .intensity-wrap {
+  background: rgba(20, 35, 42, 0.88);
+  color: #d7ebe7;
+  border-color: #35515b;
+}
+
+.intensity-select {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+}
+
+body.dark .intensity-select {
+  background: #13222b;
+  border-color: #36505a;
+  color: #d8ece8;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -281,6 +330,10 @@ button:disabled {
   margin-top: 14px;
   color: var(--ink-soft);
   font-weight: 600;
+}
+
+.answer-actions {
+  margin-bottom: 8px;
 }
 
 .result {

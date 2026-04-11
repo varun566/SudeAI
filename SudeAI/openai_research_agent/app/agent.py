@@ -107,6 +107,33 @@ class LiveResearchAgent:
             return f"What is {acronym_map[low]}?"
         return q
 
+    def _query_keywords(self, interpreted_question: str) -> set[str]:
+        normalized = interpreted_question.lower()
+        normalized = re.sub(r"[^a-z0-9\s]", " ", normalized)
+        tokens = {
+            t
+            for t in normalized.split()
+            if len(t) >= 3 and t not in {"what", "when", "where", "which", "with", "from", "that", "this", "about"}
+        }
+        # Strong hint words for common education prompts.
+        if "machine learning" in normalized:
+            tokens.update({"machine", "learning", "artificial", "intelligence"})
+        if "artificial intelligence" in normalized:
+            tokens.update({"artificial", "intelligence", "ai"})
+        return tokens
+
+    def _is_relevant(self, source: dict[str, str], interpreted_question: str) -> bool:
+        q_tokens = self._query_keywords(interpreted_question)
+        if not q_tokens:
+            return True
+        haystack = " ".join(
+            [source.get("title", "").lower(), source.get("snippet", "").lower(), source.get("url", "").lower()]
+        )
+        matches = sum(1 for tok in q_tokens if tok in haystack)
+        # Small queries need at least one token, longer ones need better overlap.
+        required = 1 if len(q_tokens) <= 4 else 2
+        return matches >= required
+
     def _source_rank(self, source: dict[str, str]) -> int:
         domain = self._domain(source.get("url", ""))
         trusted_exact = {
@@ -317,6 +344,7 @@ class LiveResearchAgent:
                 continue
             tool_trace.append(f"web_search('{q[:100]}')")
             sources.extend(self.tool_web_search(q, max_results=8))
+            sources = [s for s in sources if self._is_relevant(s, interpreted_question)]
             sources = self._dedupe(sources)
             if len(sources) >= 5:
                 break
@@ -330,6 +358,9 @@ class LiveResearchAgent:
             text = self.tool_fetch_page(src["url"])
             if text:
                 fetch_blocks.append(f"Source: {src['title']} ({src['url']})\n{text}")
+            elif src.get("snippet"):
+                # Fallback to search snippet when full page fetch is blocked.
+                fetch_blocks.append(f"Source: {src['title']} ({src['url']})\n{src['snippet']}")
 
         if len(sources) < 3:
             tool_trace.append("source_policy: insufficient_sources")
