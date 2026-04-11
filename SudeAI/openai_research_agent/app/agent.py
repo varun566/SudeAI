@@ -134,6 +134,14 @@ class LiveResearchAgent:
             return 1
         return 2
 
+    def _trust_tier(self, source: dict[str, str]) -> str:
+        rank = self._source_rank(source)
+        if rank == 0:
+            return "high"
+        if rank == 1:
+            return "medium"
+        return "low"
+
     def _dedupe(self, sources: list[dict[str, str]]) -> list[dict[str, str]]:
         out: list[dict[str, str]] = []
         seen: set[str] = set()
@@ -372,7 +380,30 @@ class LiveResearchAgent:
         self.memory.save(session_id, "user", question)
         self.memory.save(session_id, "assistant", answer)
 
-        cleaned_sources = [{"title": s["title"], "url": s["url"]} for s in self._dedupe(sources)]
+        cleaned_sources = []
+        for s in self._dedupe(sources):
+            cleaned_sources.append(
+                {
+                    "title": s["title"],
+                    "url": s["url"],
+                    "domain": self._domain(s["url"]),
+                    "trust_tier": self._trust_tier(s),
+                }
+            )
+
+        summary_lines = [ln.strip() for ln in answer.splitlines() if ln.strip()][:3]
+        summarizer_output = "\n".join(summary_lines) if summary_lines else "No summary available."
+        retriever_output = (
+            f"Queries executed: {len([t for t in tool_trace if t.startswith('web_search')])}\n"
+            f"Sources collected: {len(cleaned_sources)}\n"
+            f"Top domains: {', '.join(sorted({s['domain'] for s in cleaned_sources[:5] if s.get('domain')})) or 'none'}"
+        )
+        agent_panels = {
+            "retriever": retriever_output,
+            "analyst": answer,
+            "verifier": verification_notes,
+            "summarizer": summarizer_output,
+        }
 
         return {
             "answer": answer,
@@ -383,4 +414,5 @@ class LiveResearchAgent:
             "verified_at_utc": now,
             "tool_trace": tool_trace,
             "memory_used": len(memory),
+            "agent_panels": agent_panels,
         }

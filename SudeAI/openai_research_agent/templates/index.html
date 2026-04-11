@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenAI Research Agent</title>
+    <title>Live AI Assistant</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="container">
-      <h1>OpenAI Research Agent</h1>
+      <h1>Live AI Assistant</h1>
       <p class="subtitle">
-        Ask anything. The agent searches the web, answers, and adds verification notes.
+        Internet-connected assistant with tool calling, memory, and verification.
       </p>
 
       <form id="ask-form">
@@ -19,7 +19,12 @@
           placeholder="Ask a real-time question (news, stocks, releases, regulations, etc.)"
           required
         ></textarea>
-        <button id="submit-btn" type="submit">Research</button>
+        <div class="action-row">
+          <button id="submit-btn" type="submit">Research</button>
+          <button id="mic-btn" type="button" class="secondary">Voice Input</button>
+          <button id="speak-btn" type="button" class="secondary">Speak Answer</button>
+          <button id="new-session-btn" type="button" class="secondary">New Session</button>
+        </div>
       </form>
 
       <section id="status" class="status"></section>
@@ -30,6 +35,15 @@
 
         <h2>Conversation Timeline</h2>
         <div id="timeline" class="timeline"></div>
+
+        <h2>Multi-Agent Panel</h2>
+        <div class="tabs" id="agent-tabs">
+          <button type="button" class="tab-btn active" data-tab="retriever">Retriever</button>
+          <button type="button" class="tab-btn" data-tab="analyst">Analyst</button>
+          <button type="button" class="tab-btn" data-tab="verifier">Verifier</button>
+          <button type="button" class="tab-btn" data-tab="summarizer">Summarizer</button>
+        </div>
+        <pre id="agent-panel"></pre>
 
         <h2>Answer</h2>
         <pre id="answer"></pre>
@@ -44,7 +58,7 @@
         </div>
 
         <h2>Sources</h2>
-        <ul id="sources"></ul>
+        <div id="sources" class="source-grid"></div>
 
         <h2>Tool Trace</h2>
         <pre id="tool-trace"></pre>

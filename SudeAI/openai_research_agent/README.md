@@ -10,6 +10,10 @@ A live AI assistant that can:
 - Live web search + page fetching for latest data
 - Acronym disambiguation for tech context (e.g., `ml` -> Machine Learning)
 - Trusted-source ranking (official/news/authority domains prioritized)
+- Streaming response UX via SSE (`/ask_stream`)
+- Voice mode (browser speech-to-text + text-to-speech)
+- Multi-agent tabbed panel (Retriever, Analyst, Verifier, Summarizer)
+- Source trust cards (domain + trust tier)
 - Two-pass flow:
   - primary answer generation
   - verification/fact-check pass
@@ -107,6 +111,13 @@ Response includes:
 ### `GET /history/{session_id}`
 
 Returns recent chat memory for a session.
+
+### `GET /ask_stream?question=...&session_id=...`
+
+Streams assistant output using Server-Sent Events:
+- `status`
+- `chunk`
+- `final`
 
 ## Notes
 - This app requires internet access at runtime for web search.

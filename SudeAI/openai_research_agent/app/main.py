@@ -1,11 +1,13 @@
+import json
 import os
 import uuid
 from pathlib import Path
+from typing import Iterator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -46,6 +48,7 @@ class AskResponse(BaseModel):
     model: str
     tool_trace: list[str]
     memory_used: int
+    agent_panels: dict[str, str]
 
 
 class HistoryResponse(BaseModel):
@@ -53,7 +56,7 @@ class HistoryResponse(BaseModel):
     messages: list[dict[str, str]]
 
 
-app = FastAPI(title="Live AI Assistant", version="2.0.0")
+app = FastAPI(title="Live AI Assistant", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,14 +75,7 @@ async def home(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
-@app.post("/ask", response_model=AskResponse)
-async def ask(payload: AskRequest) -> AskResponse:
-    question = payload.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question is required.")
-
-    session_id = payload.session_id or f"session-{uuid.uuid4().hex[:12]}"
-
+def _build_response(question: str, session_id: str) -> AskResponse:
     try:
         result = agent.run(question=question, session_id=session_id)
     except Exception as exc:
@@ -96,7 +92,38 @@ async def ask(payload: AskRequest) -> AskResponse:
         model=result["model"],
         tool_trace=result["tool_trace"],
         memory_used=result["memory_used"],
+        agent_panels=result["agent_panels"],
     )
+
+
+@app.post("/ask", response_model=AskResponse)
+async def ask(payload: AskRequest) -> AskResponse:
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required.")
+
+    session_id = payload.session_id or f"session-{uuid.uuid4().hex[:12]}"
+    return _build_response(question=question, session_id=session_id)
+
+
+@app.get("/ask_stream")
+async def ask_stream(question: str, session_id: str | None = None) -> StreamingResponse:
+    q = (question or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Question is required.")
+    sid = session_id or f"session-{uuid.uuid4().hex[:12]}"
+
+    def event_stream() -> Iterator[str]:
+        yield "event: status\ndata: researching\n\n"
+        response = _build_response(question=q, session_id=sid)
+        payload = response.model_dump()
+        answer = payload.get("answer", "")
+        for i in range(0, len(answer), 56):
+            chunk = answer[i : i + 56]
+            yield f"event: chunk\ndata: {json.dumps({'text': chunk})}\n\n"
+        yield f"event: final\ndata: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.get("/history/{session_id}", response_model=HistoryResponse)
