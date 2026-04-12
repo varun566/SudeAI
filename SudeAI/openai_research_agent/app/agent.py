@@ -438,6 +438,30 @@ class LiveResearchAgent:
                 continue
         raise RuntimeError(str(last_error) if last_error else "No Gemini model available.")
 
+    def _extractive_fallback(
+        self,
+        question: str,
+        now: str,
+        sources: list[dict[str, str]],
+        fetch_blocks: list[str],
+    ) -> str:
+        top_sources = sources[:3]
+        if not top_sources:
+            return f"Insufficient sources.\n\nData Freshness: {now}"
+        bullets = []
+        for src in top_sources:
+            title = src.get("title", "Source")
+            url = src.get("url", "")
+            snippet = (src.get("snippet", "") or "").strip()
+            if snippet:
+                snippet = snippet[:220]
+            bullets.append(f"- {title}: {snippet} [{title}]({url})")
+        return (
+            f"Fallback answer (model unavailable): based on retrieved evidence for '{question}'.\n\n"
+            + "\n".join(bullets)
+            + f"\n\nData Freshness: {now}"
+        )
+
     def run(self, question: str, session_id: str, strict_sources: bool = False) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         memory = self.memory.recent(session_id, limit=8)
@@ -596,9 +620,14 @@ class LiveResearchAgent:
             f"Fetched excerpts:\n{fetched_text}\n\n"
             "Return: short answer, key facts, and a final 'Data Freshness' line."
         )
-        answer, used_model = self._generate(answer_prompt)
-        # Guardrail: prevent stale memory timestamps leaking into current output.
-        answer = re.sub(r"Data Freshness:\s*.+", f"Data Freshness: {now}", answer)
+        try:
+            answer, used_model = self._generate(answer_prompt)
+            # Guardrail: prevent stale memory timestamps leaking into current output.
+            answer = re.sub(r"Data Freshness:\s*.+", f"Data Freshness: {now}", answer)
+        except Exception:
+            used_model = "extractive-fallback"
+            tool_trace.append("model_routing: gemini_failed -> extractive_fallback")
+            answer = self._extractive_fallback(question=question, now=now, sources=sources, fetch_blocks=fetch_blocks)
 
         verification_prompt = (
             f"Current UTC time: {now}\n"
@@ -613,12 +642,23 @@ class LiveResearchAgent:
             f"Fetched excerpts for verification:\n{fetched_text}\n\n"
             "Important: Do not say you cannot browse if excerpts are provided. Verify against provided evidence."
         )
-        verification_notes, _ = self._generate(verification_prompt)
-        confidence = "Medium"
-        for line in verification_notes.splitlines():
-            if line.lower().startswith("confidence:"):
-                confidence = line.split(":", 1)[1].strip() or "Medium"
-                break
+        try:
+            verification_notes, _ = self._generate(verification_prompt)
+            confidence = "Medium"
+            for line in verification_notes.splitlines():
+                if line.lower().startswith("confidence:"):
+                    confidence = line.split(":", 1)[1].strip() or "Medium"
+                    break
+        except Exception:
+            tool_trace.append("model_routing: verifier_failed -> heuristic_verifier")
+            confidence = "Medium" if len(fetch_blocks) >= 2 else "Low"
+            verification_notes = (
+                f"Confidence: {confidence}\n"
+                "Verification Notes:\n"
+                "- Verification model was unavailable, used heuristic fallback.\n"
+                f"- Relevant sources found: {len(sources)}.\n"
+                f"- Evidence blocks extracted: {len(fetch_blocks)}."
+            )
 
         self.memory.save(session_id, "user", question)
         self.memory.save(session_id, "assistant", answer)

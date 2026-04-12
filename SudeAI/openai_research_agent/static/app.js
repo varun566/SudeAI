@@ -29,6 +29,8 @@ const sourceSnapshotsEl = document.getElementById('source-snapshots');
 const SESSION_KEY = 'live_ai_session_id';
 const THEME_KEY = 'live_ai_theme';
 const LIQUID_INTENSITY_KEY = 'live_ai_liquid_intensity';
+const OWNER_KEY = 'live_ai_owner_id';
+const REPORT_TOKEN_KEY = 'live_ai_report_token';
 let sessionId = localStorage.getItem(SESSION_KEY) || null;
 let latestAnswer = '';
 let latestAgentPanels = {};
@@ -36,6 +38,15 @@ let lastQuestion = '';
 let latestPayload = null;
 let activeRecognition = null;
 let voiceRetryCount = 0;
+
+function getOwnerId() {
+  let ownerId = localStorage.getItem(OWNER_KEY);
+  if (!ownerId) {
+    ownerId = `owner-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(OWNER_KEY, ownerId);
+  }
+  return ownerId;
+}
 
 function setTheme(mode) {
   const dark = mode === 'dark';
@@ -417,6 +428,8 @@ async function createPublicReport() {
     const historyRes = await fetch(`/history/${encodeURIComponent(sessionId)}`);
     const historyPayload = historyRes.ok ? await historyRes.json() : { messages: [] };
     const body = {
+      owner_id: getOwnerId(),
+      access_token: localStorage.getItem(REPORT_TOKEN_KEY) || null,
       session_id: sessionId,
       question: questionEl.value.trim() || lastQuestion || '',
       answer: latestPayload.answer || '',
@@ -430,6 +443,10 @@ async function createPublicReport() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (response.status === 401) {
+      statusEl.textContent = 'Report share token required. Set localStorage key live_ai_report_token.';
+      return;
+    }
     if (!response.ok) throw new Error('Share request failed');
     const data = await response.json();
     const fullUrl = `${window.location.origin}${data.public_url}`;
