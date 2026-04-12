@@ -397,6 +397,16 @@ pre {
   border: 1px solid var(--border);
 }
 
+pre a {
+  color: #0f5fca;
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+body.dark pre a {
+  color: #79bcff;
+}
+
 body.dark pre {
   background: rgba(17, 31, 38, 0.94);
 }

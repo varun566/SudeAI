@@ -322,7 +322,7 @@ class HealthResponse(BaseModel):
     utc: str
 
 
-app = FastAPI(title="Live AI Assistant", version="3.0.0")
+app = FastAPI(title="Live AI Assistant", version="4.0.0")
 REQUEST_LOG: dict[str, deque[float]] = defaultdict(deque)
 
 app.add_middleware(

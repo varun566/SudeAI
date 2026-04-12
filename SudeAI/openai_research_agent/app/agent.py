@@ -7,6 +7,7 @@ import time
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 
 import httpx
 from bs4 import BeautifulSoup
@@ -242,6 +243,37 @@ class LiveResearchAgent:
             out.append({"title": self._clean_title(s.get("title", "Source")), "url": u, "snippet": s.get("snippet", "")})
         out.sort(key=self._source_rank)
         return out
+
+    def _apply_source_diversity(
+        self,
+        sources: list[dict[str, str]],
+        max_total: int = 12,
+        max_per_domain: int = 2,
+        max_aggregator: int = 2,
+    ) -> list[dict[str, str]]:
+        if not sources:
+            return []
+        domain_counts: dict[str, int] = defaultdict(int)
+        selected: list[dict[str, str]] = []
+        aggregator_domain = "news.google.com"
+        aggregator_count = 0
+
+        for src in sources:
+            domain = self._domain(src.get("url", ""))
+            if not domain:
+                continue
+            if domain == aggregator_domain and aggregator_count >= max_aggregator:
+                continue
+            if domain_counts[domain] >= max_per_domain:
+                continue
+            selected.append(src)
+            domain_counts[domain] += 1
+            if domain == aggregator_domain:
+                aggregator_count += 1
+            if len(selected) >= max_total:
+                break
+
+        return selected
 
     def _fallback_reference_sources(self, interpreted_question: str) -> list[dict[str, str]]:
         q = interpreted_question.lower()
@@ -506,11 +538,13 @@ class LiveResearchAgent:
                 sources.extend(self.tool_google_cse_search(q, max_results=8))
             sources = [s for s in sources if self._is_relevant(s, interpreted_question)]
             sources = self._dedupe(sources)
+            sources = self._apply_source_diversity(sources)
             if len(sources) >= 5:
                 break
 
         if len(sources) < 3:
             sources = self._dedupe(sources + self._fallback_reference_sources(interpreted_question))
+            sources = self._apply_source_diversity(sources)
 
         fetch_blocks: list[str] = []
         source_snapshots: list[dict[str, str]] = []
@@ -541,7 +575,7 @@ class LiveResearchAgent:
                 # Fallback to search snippet when full page fetch is blocked.
                 fetch_blocks.append(f"Source: {src['title']} ({src['url']})\n{src['snippet']}")
 
-        sources = self._dedupe(sources)
+        sources = self._apply_source_diversity(self._dedupe(sources))
 
         if len(sources) < 3:
             tool_trace.append("source_policy: insufficient_sources")

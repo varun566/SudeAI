@@ -45,6 +45,22 @@ let lastQuestion = '';
 let latestPayload = null;
 let activeRecognition = null;
 let voiceRetryCount = 0;
+const MAX_STREAM_RETRIES = 2;
+
+function escapeHtml(text) {
+  return (text || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function renderAnswerRich(answer) {
+  const escaped = escapeHtml(answer);
+  const withLinks = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  answerEl.innerHTML = withLinks.replace(/\n/g, '<br>');
+}
 
 function getOwnerId() {
   let ownerId = localStorage.getItem(OWNER_KEY);
@@ -238,7 +254,7 @@ async function refreshTimeline() {
 function applyFinalData(data) {
   latestPayload = data;
   latestAnswer = data.answer || '';
-  answerEl.textContent = latestAnswer;
+  renderAnswerRich(latestAnswer);
 
   sessionId = data.session_id;
   localStorage.setItem(SESSION_KEY, sessionId);
@@ -267,6 +283,7 @@ function runStream(question, options = {}) {
     const es = new EventSource(`/ask_stream?${params.toString()}`);
 
     let streamed = '';
+    let gotFinal = false;
 
     es.addEventListener('status', (e) => {
       statusEl.textContent = e.data === 'researching' ? 'Researching and verifying with live web data...' : e.data;
@@ -287,6 +304,7 @@ function runStream(question, options = {}) {
     es.addEventListener('final', (e) => {
       try {
         const data = JSON.parse(e.data || '{}');
+        gotFinal = true;
         applyFinalData(data);
         statusEl.textContent = 'Done.';
         es.close();
@@ -299,9 +317,33 @@ function runStream(question, options = {}) {
 
     es.onerror = () => {
       es.close();
-      reject(new Error('Streaming failed. If APP_API_KEY is enabled, save the key in Secure Access.'));
+      if (gotFinal) return;
+      reject(new Error('Stream interrupted.'));
     };
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runStreamWithRetry(question, options = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt += 1) {
+    try {
+      if (attempt > 0) {
+        statusEl.textContent = `Waking server and retrying... (${attempt}/${MAX_STREAM_RETRIES})`;
+      }
+      await runStream(question, options);
+      return;
+    } catch (error) {
+      lastError = error;
+      const mayRetry = attempt < MAX_STREAM_RETRIES;
+      if (!mayRetry) break;
+      await sleep(1800 * (attempt + 1));
+    }
+  }
+  throw lastError || new Error('Streaming failed. If APP_API_KEY is enabled, save key in Secure Access.');
 }
 
 form.addEventListener('submit', async (event) => {
@@ -315,9 +357,9 @@ form.addEventListener('submit', async (event) => {
   resultEl.classList.add('hidden');
 
   try {
-    await runStream(question, { strictSources: false });
+    await runStreamWithRetry(question, { strictSources: false });
   } catch (error) {
-    statusEl.textContent = `Error: ${error.message}`;
+    statusEl.textContent = `Error: ${error.message}. If APP_API_KEY is enabled, save key in Secure Access.`;
   } finally {
     submitBtn.disabled = false;
     if (regenerateBtn) regenerateBtn.disabled = false;
@@ -336,9 +378,9 @@ regenerateBtn?.addEventListener('click', async () => {
   resultEl.classList.add('hidden');
   statusEl.textContent = 'Running stricter retrieval mode...';
   try {
-    await runStream(question, { strictSources: true });
+    await runStreamWithRetry(question, { strictSources: true });
   } catch (error) {
-    statusEl.textContent = `Error: ${error.message}`;
+    statusEl.textContent = `Error: ${error.message}.`;
   } finally {
     submitBtn.disabled = false;
     regenerateBtn.disabled = false;
@@ -586,6 +628,13 @@ saveApiKeyBtn?.addEventListener('click', () => {
   if (appApiKeyInput) appApiKeyInput.value = '';
   setApiKeyStateText();
   statusEl.textContent = 'App API key saved for this browser.';
+});
+
+appApiKeyInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveApiKeyBtn?.click();
+  }
 });
 
 clearApiKeyBtn?.addEventListener('click', () => {

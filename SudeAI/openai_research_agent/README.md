@@ -41,6 +41,9 @@ A live AI assistant that can:
 - Optional app-level API key protection (`APP_API_KEY`)
 - Per-scope rate limiting (`RATE_LIMIT_PER_MINUTE`)
 - Health/version ops endpoints (`/health`, `/version`)
+- Auto-retry for transient stream failures and Render cold starts
+- Clickable inline citations in the answer panel (`[Title](URL)`)
+- Source diversity guardrail (limits repeated domains and aggregator dominance)
 
 ## Project Structure
 
