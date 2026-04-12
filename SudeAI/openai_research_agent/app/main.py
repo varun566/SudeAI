@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import uuid
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -27,6 +28,18 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY")
 GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX")
 REPORT_WRITE_TOKEN = os.getenv("REPORT_WRITE_TOKEN", "").strip()
+APP_API_KEY = os.getenv("APP_API_KEY", "").strip()
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
+RATE_LIMIT_PER_MINUTE = _env_int("RATE_LIMIT_PER_MINUTE", 60)
 
 
 class AppStore:
@@ -302,7 +315,15 @@ class ReportDeleteRequest(BaseModel):
     access_token: str | None = None
 
 
-app = FastAPI(title="Live AI Assistant", version="2.8.0")
+class HealthResponse(BaseModel):
+    status: str
+    service: str
+    version: str
+    utc: str
+
+
+app = FastAPI(title="Live AI Assistant", version="3.0.0")
+REQUEST_LOG: dict[str, deque[float]] = defaultdict(deque)
 
 app.add_middleware(
     CORSMiddleware,
@@ -359,8 +380,66 @@ def _build_response(question: str, session_id: str, strict_sources: bool = False
     return response
 
 
+def _fallback_stream_payload(session_id: str, question: str, detail: str) -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "question": question,
+        "answer": detail,
+        "verification_notes": "Confidence: Low\nVerification Notes:\n- Request failed before model response.",
+        "confidence": "Low",
+        "sources": [],
+        "verified_at_utc": "",
+        "model": "error",
+        "tool_trace": ["stream_error"],
+        "memory_used": 0,
+        "source_snapshots": [],
+        "agent_panels": {
+            "retriever": "No retrieval completed due to request error.",
+            "analyst": detail,
+            "verifier": "Request failed before verification.",
+            "summarizer": detail,
+        },
+    }
+
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "").strip()
+    if xff:
+        return xff.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _enforce_rate_limit(request: Request, scope: str) -> None:
+    if RATE_LIMIT_PER_MINUTE <= 0:
+        return
+    now_ts = datetime.now(timezone.utc).timestamp()
+    key = f"{_client_ip(request)}:{scope}"
+    window = REQUEST_LOG[key]
+    while window and (now_ts - window[0]) > 60:
+        window.popleft()
+    if len(window) >= RATE_LIMIT_PER_MINUTE:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again in a minute.")
+    window.append(now_ts)
+
+
+def _enforce_app_api_key(request: Request) -> None:
+    if not APP_API_KEY:
+        return
+    supplied = request.headers.get("x-api-key") or request.query_params.get("api_key") or ""
+    if supplied != APP_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key.")
+
+
+def _enforce_protection(request: Request, scope: str) -> None:
+    _enforce_app_api_key(request)
+    _enforce_rate_limit(request, scope)
+
+
 @app.post("/ask", response_model=AskResponse)
-async def ask(payload: AskRequest) -> AskResponse:
+async def ask(payload: AskRequest, request: Request) -> AskResponse:
+    _enforce_protection(request, "ask")
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question is required.")
@@ -370,7 +449,14 @@ async def ask(payload: AskRequest) -> AskResponse:
 
 
 @app.get("/ask_stream")
-async def ask_stream(question: str, session_id: str | None = None, strict_sources: bool = False) -> StreamingResponse:
+async def ask_stream(
+    request: Request,
+    question: str,
+    session_id: str | None = None,
+    strict_sources: bool = False,
+    api_key: str | None = None,
+) -> StreamingResponse:
+    _enforce_protection(request, "ask_stream")
     q = (question or "").strip()
     if not q:
         raise HTTPException(status_code=400, detail="Question is required.")
@@ -387,26 +473,13 @@ async def ask_stream(question: str, session_id: str | None = None, strict_source
                 yield f"event: chunk\ndata: {json.dumps({'text': chunk})}\n\n"
             yield f"event: final\ndata: {json.dumps(payload)}\n\n"
         except HTTPException as exc:
-            detail = str(exc.detail)
-            fallback = {
-                "session_id": sid,
-                "question": q,
-                "answer": detail,
-                "verification_notes": "Confidence: Low\nVerification Notes:\n- Request failed before model response.",
-                "confidence": "Low",
-                "sources": [],
-                "verified_at_utc": "",
-                "model": "error",
-                "tool_trace": ["stream_error"],
-                "memory_used": 0,
-                "source_snapshots": [],
-                "agent_panels": {
-                    "retriever": "No retrieval completed due to request error.",
-                    "analyst": detail,
-                    "verifier": "Request failed before verification.",
-                    "summarizer": detail,
-                },
-            }
+            detail = str(exc.detail or "Request failed.")
+            fallback = _fallback_stream_payload(session_id=sid, question=q, detail=detail)
+            yield "event: status\ndata: error\n\n"
+            yield f"event: final\ndata: {json.dumps(fallback)}\n\n"
+        except Exception as exc:
+            detail = f"Unexpected stream error: {str(exc)}"
+            fallback = _fallback_stream_payload(session_id=sid, question=q, detail=detail)
             yield "event: status\ndata: error\n\n"
             yield f"event: final\ndata: {json.dumps(fallback)}\n\n"
 
@@ -414,13 +487,15 @@ async def ask_stream(question: str, session_id: str | None = None, strict_source
 
 
 @app.get("/history/{session_id}", response_model=HistoryResponse)
-async def history(session_id: str) -> HistoryResponse:
+async def history(session_id: str, request: Request) -> HistoryResponse:
+    _enforce_protection(request, "history")
     messages = agent.memory.recent(session_id, limit=30)
     return HistoryResponse(session_id=session_id, messages=messages)
 
 
 @app.post("/reports", response_model=ReportCreateResponse)
-async def create_report(payload: ReportCreateRequest) -> ReportCreateResponse:
+async def create_report(payload: ReportCreateRequest, request: Request) -> ReportCreateResponse:
+    _enforce_protection(request, "reports_create")
     if REPORT_WRITE_TOKEN and (payload.access_token or "") != REPORT_WRITE_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid report access token")
     report_id = f"rep-{uuid.uuid4().hex[:10]}"
@@ -434,12 +509,18 @@ async def create_report(payload: ReportCreateRequest) -> ReportCreateResponse:
 
 
 @app.get("/reports/my/{owner_id}", response_model=ReportListResponse)
-async def list_my_reports(owner_id: str) -> ReportListResponse:
+async def list_my_reports(owner_id: str, request: Request) -> ReportListResponse:
+    _enforce_protection(request, "reports_list")
     return ReportListResponse(owner_id=owner_id, reports=store.list_reports(owner_id))
 
 
 @app.patch("/reports/{report_id}/visibility")
-async def update_report_visibility(report_id: str, payload: ReportVisibilityUpdateRequest) -> dict[str, Any]:
+async def update_report_visibility(
+    report_id: str,
+    payload: ReportVisibilityUpdateRequest,
+    request: Request,
+) -> dict[str, Any]:
+    _enforce_protection(request, "reports_visibility")
     if REPORT_WRITE_TOKEN and (payload.access_token or "") != REPORT_WRITE_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid report access token")
     ok = store.update_report_visibility(report_id=report_id, owner_id=payload.owner_id, is_public=payload.is_public)
@@ -449,7 +530,8 @@ async def update_report_visibility(report_id: str, payload: ReportVisibilityUpda
 
 
 @app.delete("/reports/{report_id}")
-async def delete_report(report_id: str, payload: ReportDeleteRequest) -> dict[str, Any]:
+async def delete_report(report_id: str, payload: ReportDeleteRequest, request: Request) -> dict[str, Any]:
+    _enforce_protection(request, "reports_delete")
     if REPORT_WRITE_TOKEN and (payload.access_token or "") != REPORT_WRITE_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid report access token")
     ok = store.delete_report(report_id=report_id, owner_id=payload.owner_id)
@@ -459,7 +541,8 @@ async def delete_report(report_id: str, payload: ReportDeleteRequest) -> dict[st
 
 
 @app.get("/analytics/summary")
-async def analytics_summary(days: int = 7) -> dict[str, Any]:
+async def analytics_summary(request: Request, days: int = 7) -> dict[str, Any]:
+    _enforce_protection(request, "analytics")
     return store.analytics_summary(days=days)
 
 
@@ -519,7 +602,8 @@ async def public_report(report_id: str) -> HTMLResponse:
 
 
 @app.get("/dashboard/{owner_id}", response_class=HTMLResponse)
-async def owner_dashboard(owner_id: str) -> HTMLResponse:
+async def owner_dashboard(owner_id: str, request: Request) -> HTMLResponse:
+    _enforce_protection(request, "dashboard")
     reports = store.list_reports(owner_id, limit=100)
     rows = ""
     for r in reports:
@@ -557,3 +641,18 @@ async def owner_dashboard(owner_id: str) -> HTMLResponse:
 </html>
 """
     return HTMLResponse(content=html)
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
+    return HealthResponse(
+        status="ok",
+        service="live-ai-assistant",
+        version=app.version,
+        utc=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    return {"version": app.version}

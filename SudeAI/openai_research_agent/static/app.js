@@ -27,12 +27,17 @@ const shareReportBtn = document.getElementById('share-report-btn');
 const reportPublicToggle = document.getElementById('report-public-toggle');
 const myReportsBtn = document.getElementById('my-reports-btn');
 const sourceSnapshotsEl = document.getElementById('source-snapshots');
+const appApiKeyInput = document.getElementById('app-api-key-input');
+const saveApiKeyBtn = document.getElementById('save-api-key-btn');
+const clearApiKeyBtn = document.getElementById('clear-api-key-btn');
+const apiKeyStateEl = document.getElementById('api-key-state');
 
 const SESSION_KEY = 'live_ai_session_id';
 const THEME_KEY = 'live_ai_theme';
 const LIQUID_INTENSITY_KEY = 'live_ai_liquid_intensity';
 const OWNER_KEY = 'live_ai_owner_id';
 const REPORT_TOKEN_KEY = 'live_ai_report_token';
+const APP_API_KEY = 'live_ai_app_api_key';
 let sessionId = localStorage.getItem(SESSION_KEY) || null;
 let latestAnswer = '';
 let latestAgentPanels = {};
@@ -48,6 +53,29 @@ function getOwnerId() {
     localStorage.setItem(OWNER_KEY, ownerId);
   }
   return ownerId;
+}
+
+function getAppApiKey() {
+  return localStorage.getItem(APP_API_KEY) || '';
+}
+
+function setApiKeyStateText() {
+  const key = getAppApiKey();
+  if (!apiKeyStateEl) return;
+  apiKeyStateEl.textContent = key ? 'Protected mode enabled' : 'Public mode';
+}
+
+function withApiKeyParams(params) {
+  const key = getAppApiKey();
+  if (key) params.set('api_key', key);
+  return params;
+}
+
+async function authedFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const key = getAppApiKey();
+  if (key) headers['x-api-key'] = key;
+  return fetch(url, { ...options, headers });
 }
 
 function setTheme(mode) {
@@ -175,7 +203,9 @@ async function refreshTimeline() {
     return;
   }
   try {
-    const response = await fetch(`/history/${encodeURIComponent(sessionId)}`);
+    const params = withApiKeyParams(new URLSearchParams());
+    const historyUrl = `/history/${encodeURIComponent(sessionId)}${params.toString() ? `?${params.toString()}` : ''}`;
+    const response = await authedFetch(historyUrl);
     if (!response.ok) {
       timelineEl.innerHTML = '<div class="timeline-empty">Unable to load memory.</div>';
       return;
@@ -231,7 +261,7 @@ function applyFinalData(data) {
 
 function runStream(question, options = {}) {
   return new Promise((resolve, reject) => {
-    const params = new URLSearchParams({ question });
+    const params = withApiKeyParams(new URLSearchParams({ question }));
     if (sessionId) params.set('session_id', sessionId);
     if (options.strictSources) params.set('strict_sources', 'true');
     const es = new EventSource(`/ask_stream?${params.toString()}`);
@@ -269,7 +299,7 @@ function runStream(question, options = {}) {
 
     es.onerror = () => {
       es.close();
-      reject(new Error('Streaming failed.'));
+      reject(new Error('Streaming failed. If APP_API_KEY is enabled, save the key in Secure Access.'));
     };
   });
 }
@@ -368,7 +398,9 @@ exportSessionBtn?.addEventListener('click', async () => {
     return;
   }
   try {
-    const response = await fetch(`/history/${encodeURIComponent(sessionId)}`);
+    const params = withApiKeyParams(new URLSearchParams());
+    const historyUrl = `/history/${encodeURIComponent(sessionId)}${params.toString() ? `?${params.toString()}` : ''}`;
+    const response = await authedFetch(historyUrl);
     const history = response.ok ? await response.json() : { messages: [] };
     const lines = [];
     lines.push('# Live AI Assistant Session Report');
@@ -427,7 +459,9 @@ async function createPublicReport() {
     return;
   }
   try {
-    const historyRes = await fetch(`/history/${encodeURIComponent(sessionId)}`);
+    const params = withApiKeyParams(new URLSearchParams());
+    const historyUrl = `/history/${encodeURIComponent(sessionId)}${params.toString() ? `?${params.toString()}` : ''}`;
+    const historyRes = await authedFetch(historyUrl);
     const historyPayload = historyRes.ok ? await historyRes.json() : { messages: [] };
     const body = {
       owner_id: getOwnerId(),
@@ -441,7 +475,7 @@ async function createPublicReport() {
       sources: latestPayload.sources || [],
       history: historyPayload.messages || [],
     };
-    const response = await fetch('/reports', {
+    const response = await authedFetch('/reports', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -467,7 +501,9 @@ async function createPublicReport() {
 shareReportBtn?.addEventListener('click', createPublicReport);
 myReportsBtn?.addEventListener('click', () => {
   const ownerId = getOwnerId();
-  window.open(`/dashboard/${encodeURIComponent(ownerId)}`, '_blank', 'noopener');
+  const params = withApiKeyParams(new URLSearchParams());
+  const url = `/dashboard/${encodeURIComponent(ownerId)}${params.toString() ? `?${params.toString()}` : ''}`;
+  window.open(url, '_blank', 'noopener');
 });
 
 function stopVoiceInput() {
@@ -540,6 +576,26 @@ speakBtn.addEventListener('click', () => {
   window.speechSynthesis.speak(utterance);
 });
 
+saveApiKeyBtn?.addEventListener('click', () => {
+  const key = (appApiKeyInput?.value || '').trim();
+  if (!key) {
+    statusEl.textContent = 'Enter a key first.';
+    return;
+  }
+  localStorage.setItem(APP_API_KEY, key);
+  if (appApiKeyInput) appApiKeyInput.value = '';
+  setApiKeyStateText();
+  statusEl.textContent = 'App API key saved for this browser.';
+});
+
+clearApiKeyBtn?.addEventListener('click', () => {
+  localStorage.removeItem(APP_API_KEY);
+  if (appApiKeyInput) appApiKeyInput.value = '';
+  setApiKeyStateText();
+  statusEl.textContent = 'App API key cleared.';
+});
+
 refreshTimeline();
 initTheme();
 initLiquidIntensity();
+setApiKeyStateText();

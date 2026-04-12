@@ -1,4 +1,4 @@
-# OpenAI Research Agent
+# Live AI Assistant
 
 A live AI assistant that can:
 - access the internet
@@ -38,6 +38,9 @@ A live AI assistant that can:
 - Private/Public report visibility toggle
 - Owner dashboard page (`/dashboard/{owner_id}`)
 - Owner-only report delete and visibility update APIs
+- Optional app-level API key protection (`APP_API_KEY`)
+- Per-scope rate limiting (`RATE_LIMIT_PER_MINUTE`)
+- Health/version ops endpoints (`/health`, `/version`)
 
 ## Project Structure
 
@@ -83,26 +86,29 @@ DEMO_MODE=true
 ```
 
 When `DEMO_MODE=true`, `/ask` returns a simulated research + verification response
-without calling OpenAI.
+without calling an external model API.
 
 To use Gemini free tier for live results:
 
 ```env
 DEMO_MODE=false
-PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
 GOOGLE_CSE_API_KEY=your_google_custom_search_api_key_here
 GOOGLE_CSE_CX=your_google_custom_search_engine_id_here
 REPORT_WRITE_TOKEN=optional_token_for_report_creation
+APP_API_KEY=optional_app_api_key_for_ui_and_api_access
+RATE_LIMIT_PER_MINUTE=60
 ```
 
 `GOOGLE_CSE_API_KEY` and `GOOGLE_CSE_CX` are optional. If unset, the app still uses DDGS + Google News RSS.
+`APP_API_KEY` is optional. If set, requests must include:
+- Header: `x-api-key: <your_key>` (or `api_key` query param for SSE/dashboard links).
 
 4. Run server:
 
 ```bash
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --reload-dir app --reload-dir static --reload-dir templates --port 8000
 ```
 
 5. Open:
@@ -112,6 +118,12 @@ uvicorn app.main:app --reload --port 8000
 ## API
 
 ### `POST /ask`
+
+Optional auth header when `APP_API_KEY` is configured:
+
+```http
+x-api-key: your_app_api_key
+```
 
 Request:
 
@@ -174,13 +186,17 @@ Streams assistant output using Server-Sent Events:
 
 Optional query flag:
 - `strict_sources=true` to require stronger source coverage before answering
+- `api_key=...` when `APP_API_KEY` is enabled
 
 ## Notes
 - This app requires internet access at runtime for web search.
 - Some runs may return fewer/no explicit source annotations depending on model output.
 - If your account has no API quota, keep `DEMO_MODE=true` for presentation/testing.
-- Public reports are in-memory (reset on server restart/redeploy).
- - Public reports are persisted in SQLite (`data/app_state.db`).
+- Public reports are persisted in SQLite (`data/app_state.db`).
+
+### Ops Endpoints
+- `GET /health` -> lightweight service health probe
+- `GET /version` -> current app version
 
 ## Deploy (Render - Public URL)
 

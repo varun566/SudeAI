@@ -251,6 +251,51 @@ body.dark .chip {
   gap: 8px;
 }
 
+.security-bar {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(240, 246, 244, 0.82);
+}
+
+body.dark .security-bar {
+  background: rgba(17, 33, 39, 0.9);
+  border-color: #35515b;
+}
+
+.security-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+#app-api-key-input {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 240px;
+  font: inherit;
+  background: var(--glass-strong);
+  color: var(--text);
+}
+
+body.dark #app-api-key-input {
+  border-color: #36505a;
+  background: rgba(13, 28, 34, 0.95);
+  color: #d9ece8;
+}
+
+.security-state {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .pill {
   font-size: 0.76rem;
   padding: 4px 10px;
@@ -572,5 +617,9 @@ a {
 
   .tabs {
     gap: 6px;
+  }
+
+  #app-api-key-input {
+    min-width: 100%;
   }
 }

@@ -43,6 +43,18 @@
           <span class="pill">Voice Mode</span>
           <span class="pill">Streaming Output</span>
         </div>
+        <div class="security-bar">
+          <span class="security-label">Secure Access</span>
+          <input
+            id="app-api-key-input"
+            type="password"
+            autocomplete="off"
+            placeholder="Optional app key (APP_API_KEY)"
+          />
+          <button id="save-api-key-btn" type="button" class="secondary">Save Key</button>
+          <button id="clear-api-key-btn" type="button" class="secondary">Clear</button>
+          <span id="api-key-state" class="security-state">Public mode</span>
+        </div>
       </header>
 
       <form id="ask-form">
