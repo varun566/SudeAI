@@ -46,6 +46,7 @@ class AppStore:
                     report_id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    is_public INTEGER NOT NULL DEFAULT 1,
                     session_id TEXT NOT NULL,
                     question TEXT NOT NULL,
                     answer TEXT NOT NULL,
@@ -71,22 +72,28 @@ class AppStore:
                 )
                 """
             )
+            # Lightweight migration for existing DBs created before v2.8.
+            columns = conn.execute("PRAGMA table_info(reports)").fetchall()
+            col_names = {c[1] for c in columns}
+            if "is_public" not in col_names:
+                conn.execute("ALTER TABLE reports ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1")
             conn.commit()
 
-    def create_report(self, report_id: str, owner_id: str, payload: dict[str, Any]) -> None:
+    def create_report(self, report_id: str, owner_id: str, payload: dict[str, Any], is_public: bool) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO reports(
-                    report_id, owner_id, created_at, session_id, question, answer,
+                    report_id, owner_id, created_at, is_public, session_id, question, answer,
                     verification_notes, confidence, sources_json, history_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report_id,
                     owner_id,
                     now,
+                    1 if is_public else 0,
                     payload.get("session_id", ""),
                     payload.get("question", ""),
                     payload.get("answer", ""),
@@ -102,7 +109,7 @@ class AppStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT report_id, owner_id, created_at, session_id, question, answer,
+                SELECT report_id, owner_id, created_at, is_public, session_id, question, answer,
                        verification_notes, confidence, sources_json, history_json
                 FROM reports
                 WHERE report_id = ?
@@ -115,20 +122,21 @@ class AppStore:
             "report_id": row[0],
             "owner_id": row[1],
             "created_at": row[2],
-            "session_id": row[3],
-            "question": row[4],
-            "answer": row[5],
-            "verification_notes": row[6],
-            "confidence": row[7],
-            "sources": json.loads(row[8] or "[]"),
-            "history": json.loads(row[9] or "[]"),
+            "is_public": bool(row[3]),
+            "session_id": row[4],
+            "question": row[5],
+            "answer": row[6],
+            "verification_notes": row[7],
+            "confidence": row[8],
+            "sources": json.loads(row[9] or "[]"),
+            "history": json.loads(row[10] or "[]"),
         }
 
-    def list_reports(self, owner_id: str, limit: int = 30) -> list[dict[str, str]]:
+    def list_reports(self, owner_id: str, limit: int = 30) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT report_id, created_at, question
+                SELECT report_id, created_at, question, is_public
                 FROM reports
                 WHERE owner_id = ?
                 ORDER BY created_at DESC
@@ -136,7 +144,25 @@ class AppStore:
                 """,
                 (owner_id, limit),
             ).fetchall()
-        return [{"report_id": r[0], "created_at": r[1], "question": r[2]} for r in rows]
+        return [{"report_id": r[0], "created_at": r[1], "question": r[2], "is_public": bool(r[3])} for r in rows]
+
+    def update_report_visibility(self, report_id: str, owner_id: str, is_public: bool) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE reports SET is_public = ? WHERE report_id = ? AND owner_id = ?",
+                (1 if is_public else 0, report_id, owner_id),
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def delete_report(self, report_id: str, owner_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM reports WHERE report_id = ? AND owner_id = ?",
+                (report_id, owner_id),
+            )
+            conn.commit()
+        return cur.rowcount > 0
 
     def log_analytics(self, event: dict[str, Any]) -> None:
         with self._connect() as conn:
@@ -250,6 +276,7 @@ class ReportCreateRequest(BaseModel):
     answer: str
     verification_notes: str
     confidence: str
+    is_public: bool = True
     sources: list[dict[str, str]]
     history: list[dict[str, str]]
 
@@ -261,10 +288,21 @@ class ReportCreateResponse(BaseModel):
 
 class ReportListResponse(BaseModel):
     owner_id: str
-    reports: list[dict[str, str]]
+    reports: list[dict[str, Any]]
 
 
-app = FastAPI(title="Live AI Assistant", version="2.7.0")
+class ReportVisibilityUpdateRequest(BaseModel):
+    owner_id: str = Field(min_length=4, max_length=100)
+    access_token: str | None = None
+    is_public: bool
+
+
+class ReportDeleteRequest(BaseModel):
+    owner_id: str = Field(min_length=4, max_length=100)
+    access_token: str | None = None
+
+
+app = FastAPI(title="Live AI Assistant", version="2.8.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -386,13 +424,38 @@ async def create_report(payload: ReportCreateRequest) -> ReportCreateResponse:
     if REPORT_WRITE_TOKEN and (payload.access_token or "") != REPORT_WRITE_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid report access token")
     report_id = f"rep-{uuid.uuid4().hex[:10]}"
-    store.create_report(report_id=report_id, owner_id=payload.owner_id, payload=payload.model_dump())
+    store.create_report(
+        report_id=report_id,
+        owner_id=payload.owner_id,
+        payload=payload.model_dump(),
+        is_public=payload.is_public,
+    )
     return ReportCreateResponse(report_id=report_id, public_url=f"/r/{report_id}")
 
 
 @app.get("/reports/my/{owner_id}", response_model=ReportListResponse)
 async def list_my_reports(owner_id: str) -> ReportListResponse:
     return ReportListResponse(owner_id=owner_id, reports=store.list_reports(owner_id))
+
+
+@app.patch("/reports/{report_id}/visibility")
+async def update_report_visibility(report_id: str, payload: ReportVisibilityUpdateRequest) -> dict[str, Any]:
+    if REPORT_WRITE_TOKEN and (payload.access_token or "") != REPORT_WRITE_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid report access token")
+    ok = store.update_report_visibility(report_id=report_id, owner_id=payload.owner_id, is_public=payload.is_public)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Report not found for this owner")
+    return {"ok": True, "report_id": report_id, "is_public": payload.is_public}
+
+
+@app.delete("/reports/{report_id}")
+async def delete_report(report_id: str, payload: ReportDeleteRequest) -> dict[str, Any]:
+    if REPORT_WRITE_TOKEN and (payload.access_token or "") != REPORT_WRITE_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid report access token")
+    ok = store.delete_report(report_id=report_id, owner_id=payload.owner_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Report not found for this owner")
+    return {"ok": True, "report_id": report_id}
 
 
 @app.get("/analytics/summary")
@@ -405,6 +468,8 @@ async def public_report(report_id: str) -> HTMLResponse:
     report = store.get_report(report_id)
     if not report:
         return HTMLResponse(status_code=404, content="<h1>Report not found</h1>")
+    if not report.get("is_public", True):
+        return HTMLResponse(status_code=403, content="<h1>This report is private</h1>")
 
     history_html = ""
     for msg in report.get("history", []):
@@ -447,6 +512,47 @@ async def public_report(report_id: str) -> HTMLResponse:
     <ul>{sources_html}</ul>
     <h2>Timeline</h2>
     {history_html}
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@app.get("/dashboard/{owner_id}", response_class=HTMLResponse)
+async def owner_dashboard(owner_id: str) -> HTMLResponse:
+    reports = store.list_reports(owner_id, limit=100)
+    rows = ""
+    for r in reports:
+        vis = "Public" if r.get("is_public") else "Private"
+        rid = escape(str(r.get("report_id", "")))
+        q = escape(str(r.get("question", "")))
+        created = escape(str(r.get("created_at", "")))
+        rows += (
+            f"<tr><td>{rid}</td><td>{created}</td><td>{vis}</td><td>{q}</td>"
+            f"<td><a href='/r/{rid}' target='_blank'>Open</a></td></tr>"
+        )
+    html = f"""
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Owner Dashboard</title>
+    <style>
+      body {{ font-family: Manrope, Arial, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 16px; }}
+      table {{ width: 100%; border-collapse: collapse; }}
+      th, td {{ border: 1px solid #d9e1df; padding: 8px; text-align: left; vertical-align: top; }}
+      th {{ background: #f4f8f7; }}
+    </style>
+  </head>
+  <body>
+    <h1>Owner Dashboard</h1>
+    <p><strong>Owner ID:</strong> {escape(owner_id)}</p>
+    <p><a href="/analytics/summary" target="_blank">Open Analytics Summary</a></p>
+    <table>
+      <thead><tr><th>Report ID</th><th>Created (UTC)</th><th>Visibility</th><th>Question</th><th>Link</th></tr></thead>
+      <tbody>{rows or '<tr><td colspan=\"5\">No reports yet.</td></tr>'}</tbody>
+    </table>
   </body>
 </html>
 """

@@ -518,6 +518,16 @@ body.dark .source-card {
   text-decoration: underline;
 }
 
+.report-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-toggle input {
+  accent-color: var(--accent);
+}
+
 .snapshot-excerpt {
   margin-top: 8px;
   color: var(--ink-soft);

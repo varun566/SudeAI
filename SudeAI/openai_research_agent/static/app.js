@@ -24,6 +24,8 @@ const copyAnswerBtn = document.getElementById('copy-answer-btn');
 const downloadAnswerBtn = document.getElementById('download-answer-btn');
 const exportSessionBtn = document.getElementById('export-session-btn');
 const shareReportBtn = document.getElementById('share-report-btn');
+const reportPublicToggle = document.getElementById('report-public-toggle');
+const myReportsBtn = document.getElementById('my-reports-btn');
 const sourceSnapshotsEl = document.getElementById('source-snapshots');
 
 const SESSION_KEY = 'live_ai_session_id';
@@ -435,6 +437,7 @@ async function createPublicReport() {
       answer: latestPayload.answer || '',
       verification_notes: latestPayload.verification_notes || '',
       confidence: latestPayload.confidence || '',
+      is_public: reportPublicToggle?.checked !== false,
       sources: latestPayload.sources || [],
       history: historyPayload.messages || [],
     };
@@ -462,6 +465,10 @@ async function createPublicReport() {
 }
 
 shareReportBtn?.addEventListener('click', createPublicReport);
+myReportsBtn?.addEventListener('click', () => {
+  const ownerId = getOwnerId();
+  window.open(`/dashboard/${encodeURIComponent(ownerId)}`, '_blank', 'noopener');
+});
 
 function stopVoiceInput() {
   if (activeRecognition) {
