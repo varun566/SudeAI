@@ -1,0 +1,16 @@
+# Requires the Prometheus Operator CRDs (for example kube-prometheus-stack).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: telemetry-api
+  namespace: telemetry
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: telemetry-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
